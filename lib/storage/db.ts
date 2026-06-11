@@ -9,6 +9,7 @@ import type {
   OutreachTarget,
   MarketProfile,
   ExportPackage,
+  Stage4RawResumeText,
   CalibrationReference,
   CalibrationCandidate,
   CalibrationSynthesisRecord,
@@ -27,6 +28,7 @@ export class ResumeBuilderDB extends Dexie {
   outreachTargets!: Table<OutreachTarget>
   marketProfiles!: Table<MarketProfile>
   exportPackages!: Table<ExportPackage>
+  stage4RawResumeTexts!: Table<Stage4RawResumeText>
   calibrationReferences!: Table<CalibrationReference>
   calibrationCandidates!: Table<CalibrationCandidate>
   calibrationSyntheses!: Table<CalibrationSynthesisRecord>
@@ -102,6 +104,11 @@ export class ResumeBuilderDB extends Dexie {
     this.version(7).stores({
       calibrationSyntheses: 'id, sessionId, generatedAt',
       appliedCalibrationStates: 'id, sessionId, appliedAt'
+    })
+
+    // v8: stores Stage 4 raw resume text assemblies.
+    this.version(8).stores({
+      stage4RawResumeTexts: 'id, sessionId, status, updatedAt'
     })
   }
 }

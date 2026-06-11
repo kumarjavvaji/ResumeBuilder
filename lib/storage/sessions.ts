@@ -61,6 +61,7 @@ export async function deleteSession(id: string): Promise<void> {
     db.outreachTargets,
     db.marketProfiles,
     db.exportPackages,
+    db.stage4RawResumeTexts,
     db.calibrationReferences,
     db.calibrationCandidates,
     db.calibrationSyntheses,
@@ -73,6 +74,7 @@ export async function deleteSession(id: string): Promise<void> {
     await db.outreachTargets.where('sessionId').equals(id).delete()
     await db.marketProfiles.where('sessionId').equals(id).delete()
     await db.exportPackages.where('sessionId').equals(id).delete()
+    await db.stage4RawResumeTexts.where('sessionId').equals(id).delete()
     await db.calibrationReferences.where('sessionId').equals(id).delete()
     await db.calibrationCandidates.where('sessionId').equals(id).delete()
     await db.calibrationSyntheses.where('sessionId').equals(id).delete()

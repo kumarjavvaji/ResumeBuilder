@@ -487,6 +487,55 @@ export interface ExportPackage {
   additionalJobs: AdjacentJob[]
 }
 
+export type Stage4RawResumeStatus =
+  | 'not_generated'
+  | 'generated'
+  | 'needs_review'
+  | 'accepted'
+  | 'stale'
+
+export type Stage4StructureSource = 'uploaded_resume' | 'manual_profile' | 'default'
+
+export interface Stage4SourceArtifactSnapshot {
+  id: string
+  type: SectionType
+  version: number
+  updatedAt: string
+}
+
+export interface Stage4ExperienceBlock {
+  roleId: string
+  title: string
+  company: string
+  dates: string
+  location?: string
+  headingText: string
+  bullets: string[]
+  sourceArtifactSectionId: string
+}
+
+export interface Stage4RawResumeSections {
+  summary: string
+  skills: string
+  experiences: Stage4ExperienceBlock[]
+  education: string
+  fullText: string
+}
+
+export interface Stage4RawResumeText {
+  id: string
+  sessionId: string
+  status: Stage4RawResumeStatus
+  sourceArtifactSectionIds: string[]
+  sourceArtifactSnapshots: Stage4SourceArtifactSnapshot[]
+  generatedAt: string
+  updatedAt: string
+  structureSource: Stage4StructureSource
+  sections: Stage4RawResumeSections
+  warnings: string[]
+  staleReasons: string[]
+}
+
 // ─────────────────────────────────────────────
 // Stage 5 — Learning Signals
 // ─────────────────────────────────────────────
@@ -515,6 +564,18 @@ export type LearningSignalType =
   | 'evidence-classification'
   | 'domain-translation'
   | 'generation-drift'
+  | 'jd_alignment_strategy'
+  | 'bridge_question_effectiveness'
+  | 'calibration_pattern'
+  | 'evidence_boundary'
+  | 'role_scope_rule'
+  | 'naturalization_rule'
+  | 'export_assembly_rule'
+  | 'rejected_overclaim'
+  | 'reusable_prompt_heuristic'
+  | 'global_product_improvement'
+  | 'personal_positioning_rule'
+  | 'artifact_strategy'
 
 export interface LearningSignal {
   id: string

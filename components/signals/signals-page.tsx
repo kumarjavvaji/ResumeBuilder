@@ -19,7 +19,19 @@ const TYPE_LABELS: Record<LearningSignalType, string> = {
   'bridge-question-pattern': 'Bridge Question Pattern',
   'evidence-classification': 'Evidence Classification',
   'domain-translation': 'Domain Translation',
-  'generation-drift': 'Generation Drift'
+  'generation-drift': 'Generation Drift',
+  jd_alignment_strategy: 'JD Alignment Strategy',
+  bridge_question_effectiveness: 'Bridge Question Effectiveness',
+  calibration_pattern: 'Calibration Pattern',
+  evidence_boundary: 'Evidence Boundary',
+  role_scope_rule: 'Role Scope Rule',
+  naturalization_rule: 'Naturalization Rule',
+  export_assembly_rule: 'Export Assembly Rule',
+  rejected_overclaim: 'Rejected Overclaim',
+  reusable_prompt_heuristic: 'Reusable Prompt Heuristic',
+  global_product_improvement: 'Global Product Improvement',
+  personal_positioning_rule: 'Personal Positioning Rule',
+  artifact_strategy: 'Artifact Strategy'
 }
 
 const PRODUCT_AREA_LABELS: Record<ProductArea, string> = {
@@ -44,7 +56,19 @@ const TYPE_COLORS: Partial<Record<LearningSignalType, string>> = {
   'bridge-question-pattern': 'bg-indigo-100 text-indigo-700',
   'evidence-classification': 'bg-cyan-100 text-cyan-700',
   'domain-translation': 'bg-pink-100 text-pink-700',
-  'generation-drift': 'bg-red-50 text-red-600'
+  'generation-drift': 'bg-red-50 text-red-600',
+  jd_alignment_strategy: 'bg-sky-100 text-sky-700',
+  bridge_question_effectiveness: 'bg-indigo-100 text-indigo-700',
+  calibration_pattern: 'bg-blue-100 text-blue-700',
+  evidence_boundary: 'bg-amber-100 text-amber-700',
+  role_scope_rule: 'bg-cyan-100 text-cyan-700',
+  naturalization_rule: 'bg-lime-100 text-lime-700',
+  export_assembly_rule: 'bg-emerald-100 text-emerald-700',
+  rejected_overclaim: 'bg-red-100 text-red-700',
+  reusable_prompt_heuristic: 'bg-violet-100 text-violet-700',
+  global_product_improvement: 'bg-purple-100 text-purple-700',
+  personal_positioning_rule: 'bg-teal-100 text-teal-700',
+  artifact_strategy: 'bg-teal-100 text-teal-700'
 }
 
 // ── Promote modal ─────────────────────────────────────────────────────────
