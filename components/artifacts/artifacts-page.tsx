@@ -231,6 +231,7 @@ export function ArtifactsPage({ sessionId }: { sessionId: string }) {
         signalInfluence: data.signalInfluence,
         jdTraceability: data.jdTraceability ?? [],
         blockedClaimDiagnostics: data.blockedClaimDiagnostics ?? [],
+        calibrationInfluence: data.calibrationInfluence,
         generationProvenance: provenance,
         status: operation === 'refine' ? 'needs_review' : 'generated'
       })

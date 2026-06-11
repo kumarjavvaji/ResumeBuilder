@@ -9,7 +9,8 @@ import type {
   LearningSignal,
   EmphasisCategory,
   BlockedClaimDiagnostic,
-  CalibrationSummary
+  CalibrationSummary,
+  CalibrationInfluence
 } from '@/contracts'
 import { nanoid } from '@/lib/storage/nanoid'
 import {
@@ -19,6 +20,11 @@ import {
   type ScopedEvidenceBundle
 } from '@/lib/evidence-scope'
 import { validateSectionClaims, mapResultToPartition } from '@/lib/claim-validator'
+import {
+  normalizeCalibrationInfluence,
+  sanitizeCalibrationEvidenceRefs,
+  sanitizeSourceMappings
+} from '@/lib/calibration/influence'
 
 export interface GenerateOptions {
   sessionId: string
@@ -55,6 +61,7 @@ export interface GeneratedSection {
   signalInfluence?: string
   jdTraceability: string[]
   blockedClaimDiagnostics: BlockedClaimDiagnostic[]
+  calibrationInfluence: CalibrationInfluence
 }
 
 export async function generateArtifactSection(opts: GenerateOptions): Promise<GeneratedSection> {
@@ -109,6 +116,7 @@ export async function generateArtifactSection(opts: GenerateOptions): Promise<Ge
     evidenceWarnings: string[]
     sourceMappings: string[]
     jdTraceability: string[]
+    calibrationInfluence?: Partial<CalibrationInfluence>
   }
 
   const personalCount = acceptedSignals.length
@@ -119,7 +127,7 @@ export async function generateArtifactSection(opts: GenerateOptions): Promise<Ge
   ].filter(Boolean).join(', ') || undefined
 
   // Post-generation: deterministic claim validation — assigns partition to every bullet
-  const rawBullets = raw.bullets ?? []
+  const rawBullets = sanitizeCalibrationEvidenceRefs(raw.bullets ?? [])
   const validationResults = validateSectionClaims(rawBullets, bundle)
 
   const blockedClaimDiagnostics: BlockedClaimDiagnostic[] = []
@@ -156,16 +164,21 @@ export async function generateArtifactSection(opts: GenerateOptions): Promise<Ge
     .filter(r => r.partition !== 'display')
     .map(r => `Claim partitioned to "${r.partition}": ${r.partitionReason}`)
   const evidenceWarnings = [...sectionSpecificWarnings, ...partitionWarnings]
+  const calibrationInfluence = normalizeCalibrationInfluence(raw.calibrationInfluence, {
+    calibrationAvailable: calibrationSummary !== undefined,
+    sectionType
+  })
 
   return {
     content,
     bullets: finalBullets,
     generationRationale: raw.generationRationale ?? '',
     evidenceWarnings,
-    sourceMappings: raw.sourceMappings ?? [],
+    sourceMappings: sanitizeSourceMappings(raw.sourceMappings ?? []),
     signalInfluence,
     jdTraceability: raw.jdTraceability ?? [],
     blockedClaimDiagnostics,
+    calibrationInfluence,
   }
 }
 
@@ -253,6 +266,9 @@ Evidence rules:
 - For every bullet, cite which work entry or metric justifies it in evidenceRef.
 - Populate evidenceWarnings for any required JD skill that the section cannot address from profile evidence.
 - Populate sourceMappings as "claim text → work entry title + company" for traceability.
+- Calibration is not evidence. Never cite calibration references, companies, people, match reasons, or market patterns in evidenceRef or sourceMappings.
+- Return calibrationInfluence separately from generationRationale. It must state whether calibration merely existed or concretely changed wording, emphasis, inclusion, exclusion, ordering, or gap handling.
+- calibrationInfluence.artifactDecisions must be concrete artifact decisions, not generic claims. Good: "Ordered Business Analyst bullets before cross-role context because SI BA calibration patterns favored BA-specific evidence." Bad: "Used calibration to make this stronger."
 - Respect two-page resume constraint for resume sections.
 ${rejectedBlock}
 ${constraintsBlock}
@@ -427,7 +443,7 @@ function buildToolSchema(type: SectionType) {
     description: `Generate a ${type} artifact section with claim validation and evidence warnings.`,
     input_schema: {
       type: 'object' as const,
-      required: ['content', 'bullets', 'generationRationale', 'evidenceWarnings', 'sourceMappings', 'jdTraceability'],
+      required: ['content', 'bullets', 'generationRationale', 'evidenceWarnings', 'sourceMappings', 'jdTraceability', 'calibrationInfluence'],
       properties: {
         content: {
           type: 'string',
@@ -476,6 +492,64 @@ function buildToolSchema(type: SectionType) {
           type: 'array',
           items: { type: 'string' },
           description: 'Which JD requirement texts this section addresses.'
+        },
+        calibrationInfluence: {
+          type: 'object',
+          required: ['calibrationAvailable', 'calibrationUsed', 'useLevel', 'influenceSummary', 'influencedPatterns', 'artifactDecisions'],
+          description: 'Structured audit of market-calibration influence. Calibration is not evidence and must not appear in sourceMappings.',
+          properties: {
+            calibrationAvailable: {
+              type: 'boolean',
+              description: 'True when market calibration context was present in the prompt.'
+            },
+            calibrationUsed: {
+              type: 'boolean',
+              description: 'True only when one or more concrete artifact decisions were shaped by calibration.'
+            },
+            useLevel: {
+              type: 'string',
+              enum: ['none', 'light', 'material'],
+              description: 'none=no meaningful decision changed; light=wording/emphasis changed; material=inclusion, ordering, exclusion, or major framing changed.'
+            },
+            influenceSummary: {
+              type: 'string',
+              description: 'One concise sentence summarizing calibration influence, or that no material influence was recorded.'
+            },
+            influencedPatterns: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Short pattern labels that influenced artifact decisions. No person/company matchReason text.'
+            },
+            ignoredPatterns: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Calibration patterns not used because user/JD/profile evidence did not support them.'
+            },
+            artifactDecisions: {
+              type: 'array',
+              description: 'Concrete decisions caused by calibration. Empty if calibration was merely available.',
+              items: {
+                type: 'object',
+                required: ['pattern', 'decisionType', 'decision'],
+                properties: {
+                  pattern: { type: 'string' },
+                  decisionType: {
+                    type: 'string',
+                    enum: ['wording', 'emphasis', 'inclusion', 'exclusion', 'ordering', 'gap_handling']
+                  },
+                  decision: {
+                    type: 'string',
+                    description: 'Specific artifact decision. Must not be vague or cite calibration as user evidence.'
+                  },
+                  affectedClaimIds: {
+                    type: 'array',
+                    items: { type: 'string' }
+                  },
+                  affectedSection: { type: 'string' }
+                }
+              }
+            }
+          }
         }
       }
     }

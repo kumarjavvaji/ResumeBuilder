@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import type { ArtifactSection, ResumeBullet, BulletPartition, SectionType, ArtifactGenerationProvenance } from '@/contracts'
 import { isGlobalEvidenceWarning } from '@/lib/evidence-scope'
+import { formatCalibrationInfluenceLine } from '@/lib/calibration/influence'
 import { Badge } from '@/components/shared/badge'
 import { cn } from '@/lib/cn'
 import { inputCls, textareaCls } from '@/lib/input-cls'
@@ -36,10 +37,16 @@ function ProvenanceLine({ provenance, currentCalibrationStateId }: {
     calibrationStateId !== currentCalibrationStateId
 
   if (isStale) {
+    const priorLabel = calibrationStateId
+      ? ` Prior calibration version: ${calibrationStateId.slice(0, 8)}.`
+      : ''
+    const counts = targetReferenceCount !== undefined || comparableReferenceCount !== undefined
+      ? ` Generated with ${targetReferenceCount ?? 0} target / ${comparableReferenceCount ?? 0} comparable refs.`
+      : ''
     return (
       <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/20 border border-amber-900/40 rounded text-xs text-amber-500">
         <span>⚠</span>
-        <span>Calibration changed after this section was generated. Regenerate to apply latest guidance.</span>
+        <span>Calibration changed after this section was generated.{priorLabel}{counts} Regenerate to apply latest guidance.</span>
       </div>
     )
   }
@@ -84,6 +91,46 @@ const SECTION_LABELS: Partial<Record<SectionType, string>> = {
   'experience-qa': 'Experience (QA / Quality)',
   summary: 'Professional Summary',
   skills: 'Skills',
+}
+
+function CalibrationInfluenceAudit({ section }: { section: ArtifactSection }) {
+  const line = formatCalibrationInfluenceLine(section.calibrationInfluence)
+  if (!line) return null
+
+  const decisions = section.calibrationInfluence?.artifactDecisions ?? []
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-start gap-1.5 px-3 py-1.5 bg-slate-900/50 border border-slate-700 rounded text-xs text-slate-300">
+        <span className="shrink-0">-&gt;</span>
+        <span>{line}</span>
+      </div>
+
+      {decisions.length > 0 && (
+        <details className="text-xs">
+          <summary className="text-gray-500 cursor-pointer hover:text-gray-300 select-none">
+            Calibration decisions ({decisions.length})
+          </summary>
+          <ul className="mt-1.5 pl-2 space-y-1.5">
+            {decisions.map((d, i) => (
+              <li key={`${d.pattern}-${i}`} className="text-gray-500 border-l border-slate-700 pl-2">
+                <div className="flex flex-wrap gap-1.5">
+                  <span className="text-slate-300">{d.pattern}</span>
+                  <span className="text-slate-500">[{d.decisionType}]</span>
+                  {d.affectedClaimIds?.length ? (
+                    <span className="text-slate-600">claims: {d.affectedClaimIds.join(', ')}</span>
+                  ) : d.affectedSection ? (
+                    <span className="text-slate-600">section: {d.affectedSection}</span>
+                  ) : null}
+                </div>
+                <p className="mt-0.5">{d.decision}</p>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  )
 }
 
 export function ArtifactSectionCard({
@@ -138,6 +185,8 @@ export function ArtifactSectionCard({
         provenance={section.generationProvenance}
         currentCalibrationStateId={currentCalibrationStateId}
       />
+
+      <CalibrationInfluenceAudit section={section} />
 
       {/* Evidence warnings (section-specific only; domain-gap warnings shown globally) */}
       {hasEvidenceWarnings && (

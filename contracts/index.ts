@@ -272,6 +272,26 @@ export type CalibrationStatusAtGeneration =
   | 'applied_partial'
   | 'applied_full'
 
+export type CalibrationInfluenceUseLevel = 'none' | 'light' | 'material'
+
+export interface CalibrationArtifactDecision {
+  pattern: string
+  decisionType: 'wording' | 'emphasis' | 'inclusion' | 'exclusion' | 'ordering' | 'gap_handling'
+  decision: string
+  affectedClaimIds?: string[]
+  affectedSection?: string
+}
+
+export interface CalibrationInfluence {
+  calibrationAvailable: boolean
+  calibrationUsed: boolean
+  useLevel: CalibrationInfluenceUseLevel
+  influenceSummary: string
+  influencedPatterns: string[]
+  artifactDecisions: CalibrationArtifactDecision[]
+  ignoredPatterns?: string[]
+}
+
 export interface ArtifactGenerationProvenance {
   generatedAt: string
   operation: 'generate' | 'refine' | 'regenerate'
@@ -424,6 +444,8 @@ export interface ArtifactSection {
   jdTraceability: string[]
   /** Diagnostics for claims that were blocked or downgraded during post-generation validation. */
   blockedClaimDiagnostics?: BlockedClaimDiagnostic[]
+  /** Structured audit of how market calibration shaped this section. Not evidence. */
+  calibrationInfluence?: CalibrationInfluence
   /** Provenance of this generation — calibration state used, operation, timestamps. */
   generationProvenance?: ArtifactGenerationProvenance
   version: number
