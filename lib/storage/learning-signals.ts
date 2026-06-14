@@ -37,13 +37,6 @@ export async function getRejectedPhrases(): Promise<string[]> {
   return signals.map(s => s.content)
 }
 
-export async function getAcceptedBullets(limit = 30): Promise<LearningSignal[]> {
-  return db.learningSignals
-    .where('type').equals('accepted-bullet')
-    .limit(limit)
-    .toArray()
-}
-
 export async function getPersonalSignalsForRole(
   roleCategory: EmphasisCategory,
   limit = 20

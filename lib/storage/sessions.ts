@@ -1,5 +1,5 @@
 import { db } from './db'
-import type { TargetIntake, SessionStageStatuses, StageKey } from '@/contracts'
+import type { TargetIntake, SessionStageStatuses, StageKey, FitAnalysis } from '@/contracts'
 import { deriveStageStatuses } from '@/contracts'
 
 export async function saveSession(session: TargetIntake): Promise<void> {
@@ -50,6 +50,20 @@ export async function updateStageStatus(
     stageStatuses: { ...current, [stage]: stageStatus },
     updatedAt: new Date().toISOString()
   })
+}
+
+export async function updateFitAnalysis(
+  id: string,
+  fitAnalysis: FitAnalysis
+): Promise<void> {
+  await db.sessions.update(id, { fitAnalysis, updatedAt: new Date().toISOString() })
+}
+
+export async function updateOverallRefinementPrompt(
+  id: string,
+  prompt: string
+): Promise<void> {
+  await db.sessions.update(id, { overallRefinementPrompt: prompt, updatedAt: new Date().toISOString() })
 }
 
 export async function deleteSession(id: string): Promise<void> {

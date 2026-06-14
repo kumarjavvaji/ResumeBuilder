@@ -17,6 +17,7 @@ export async function parseDomainIQ(rawText: string): Promise<DomainIQImport> {
   if (rawText.trim().startsWith('{')) {
     try {
       const parsed = JSON.parse(rawText.trim())
+      // Legacy flat format
       if (typeof parsed.companyProfile === 'string' && Array.isArray(parsed.industrySignals)) {
         return {
           rawText,
@@ -24,6 +25,29 @@ export async function parseDomainIQ(rawText: string): Promise<DomainIQImport> {
           industrySignals: parsed.industrySignals ?? [],
           techStack: parsed.techStack ?? [],
           cultureSignals: parsed.cultureSignals ?? [],
+        }
+      }
+      // New diq_stage3_resume_builder_basis format
+      const exp = parsed.export
+      if (exp?.exportKind === 'diq_stage3_resume_builder_basis') {
+        const domainBasis = exp.domainBasis ?? {}
+        const positioning = exp.resumePositioningBasis ?? {}
+        const allText = [
+          domainBasis.thesis ?? '',
+          ...(exp.qualifiedInsights ?? []).map((i: { claim?: string }) => i.claim ?? ''),
+          ...(positioning.angles ?? []),
+        ].join(' ')
+        const tech = new Set<string>()
+        // ALLCAPS acronyms: NCUA, CFPB, HMDA, MANTL, UAT, KYC, API
+        for (const m of allText.matchAll(/\b([A-Z]{3,})\b/g)) tech.add(m[1])
+        // Named platforms before context keywords: Symitar, Backbase, Plaid
+        for (const m of allText.matchAll(/\b([A-Z][a-zA-Z]{3,})\s+(?:confirmed|integration|partnership|platform|Engagement)/g)) tech.add(m[1])
+        return {
+          rawText,
+          companyProfile: domainBasis.thesis ?? '',
+          industrySignals: domainBasis.keyThemes ?? [],
+          techStack: [...tech],
+          cultureSignals: positioning.businessConcepts ?? [],
         }
       }
     } catch {

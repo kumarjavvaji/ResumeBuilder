@@ -226,14 +226,8 @@ function stage4(): Stage4RawResumeText {
 
 function storedSignals(): LearningSignal[] {
   return [
-    {
-      id: 'sig-1',
-      scope: 'personal',
-      type: 'accepted-bullet',
-      content: 'Raw accepted bullet fact.',
-      context: 'accepted',
-      createdAt: '2026-01-01T00:00:00.000Z'
-    },
+    // accepted-bullet is no longer a valid LearningSignalType — it lives in artifactHistory.
+    // Only negative generation constraints and reusable rules belong in storedSignals.
     {
       id: 'sig-2',
       scope: 'personal',
@@ -258,18 +252,21 @@ function report() {
 }
 
 describe('Stage 5 session learning redesign', () => {
-  it('does not classify every accepted bullet as a primary learning signal', () => {
+  it('accepted bullets are not present in learning signals at all — they live in artifact history', () => {
     const built = report()
     const primary = primaryLearningSignals(built)
+    // No signal type resembles raw resume content
     expect(primary.every(s => s.type !== 'accepted-bullet')).toBe(true)
-    expect(primary.length).toBeLessThan(built.artifactFacts.acceptedBullets.length + primary.length)
+    expect(primary.every(s => s.type !== 'rejected-bullet')).toBe(true)
+    expect(primary.every(s => s.type !== 'approved-metric')).toBe(true)
   })
 
-  it('stores accepted bullets under Artifact Facts, not default Strategy Learnings', () => {
+  it('stores accepted bullets from live sections under Artifact Facts, not Strategy Learnings', () => {
     const built = report()
     expect(built.defaultTab).toBe('strategy')
-    expect(built.artifactFacts.acceptedBullets).toContain('Raw accepted bullet fact.')
-    expect(primaryLearningSignals(built).map(s => s.content)).not.toContain('Raw accepted bullet fact.')
+    // Bullets come from live accepted artifact sections, not from storedSignals
+    expect(built.artifactFacts.acceptedBullets).toContain('Translated support signals into requirements and gap-analysis priorities.')
+    expect(primaryLearningSignals(built).map(s => s.content)).not.toContain('Translated support signals into requirements and gap-analysis priorities.')
   })
 
   it('generates meta-signals from Stage 1 JD gaps', () => {
@@ -327,10 +324,15 @@ describe('Stage 5 session learning redesign', () => {
     expect(report().defaultTab).toBe('strategy')
   })
 
-  it('Artifact Facts tab still preserves accepted bullets and rejected phrases', () => {
+  it('Artifact Facts tab preserves bullets from live sections and rejected phrases from stored signals', () => {
     const facts = report().artifactFacts
-    expect(facts.acceptedBullets).toContain('Raw accepted bullet fact.')
+    // Bullets from the accepted artifact sections fixture
+    expect(facts.acceptedBullets).toContain('Translated support signals into requirements and gap-analysis priorities.')
+    expect(facts.acceptedBullets).toContain('Owned backlog sequencing.')
+    // Rejected phrases from storedSignals (still stored in learningSignals as negative constraints)
     expect(facts.rejectedPhrases).toContain('leverage synergies')
+    // No raw bullet fact from storedSignals (that path is removed)
+    expect(facts.acceptedBullets).not.toContain('Raw accepted bullet fact.')
   })
 
   it('global product signals do not include calibration person names or raw match reasons', () => {
@@ -354,9 +356,16 @@ describe('Stage 5 session learning redesign', () => {
     expect(built.strategySummary).toContain('Resume Builder shifted')
   })
 
-  it('artifactFactsFromSignals keeps facts out of strategy construction', () => {
+  it('artifactFactsFromSignals only reads rejected phrases — bullets are no longer in learningSignals', () => {
     const facts = artifactFactsFromSignals(storedSignals())
-    expect(facts.acceptedBullets).toEqual(['Raw accepted bullet fact.'])
+    // acceptedBullets field no longer exists on the return value; only rejectedPhrases
     expect(facts.rejectedPhrases).toEqual(['leverage synergies'])
+  })
+
+  it('derives a reusable generation rule from accepted bullet patterns instead of raw bullet text', () => {
+    const built = report()
+    const derived = primaryLearningSignals(built).filter(s => s.type === 'artifact_strategy')
+    // At least one derived strategy signal should describe the dominant section pattern
+    expect(derived.some(s => s.content.includes('Prioritize this section in future artifact generation'))).toBe(true)
   })
 })

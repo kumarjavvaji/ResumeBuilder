@@ -1,9 +1,11 @@
 import { anthropic, MODEL } from './client'
 import type { JDRequirementMap, DomainIQImport, EmphasisCategory, UserProfile } from '@/contracts'
 
-interface IntakeSynthesis {
+export interface IntakeSynthesis {
   companySummary: string
   fitHypothesis: string
+  /** 1-2 sentences on who evaluates this role and what they prioritize. */
+  evaluatorLens: string
   riskGaps: string[]
   emphasisRecommendation: EmphasisCategory
 }
@@ -21,10 +23,14 @@ export async function generateIntakeSynthesis(
       description: 'Synthesize intake analysis for a job target.',
       input_schema: {
         type: 'object' as const,
-        required: ['companySummary', 'fitHypothesis', 'riskGaps', 'emphasisRecommendation'],
+        required: ['companySummary', 'fitHypothesis', 'evaluatorLens', 'riskGaps', 'emphasisRecommendation'],
         properties: {
           companySummary: { type: 'string' },
           fitHypothesis: { type: 'string' },
+          evaluatorLens: {
+            type: 'string',
+            description: '1-2 sentences on who evaluates this role (hiring manager, eng lead, etc.) and what they will prioritize when reviewing resumes.',
+          },
           riskGaps: { type: 'array', items: { type: 'string' } },
           emphasisRecommendation: {
             type: 'string',
@@ -48,6 +54,7 @@ Emphasis categories:
 Rules:
 - companySummary: 2-3 sentences. What this company does and why it matters for the candidate's narrative.
 - fitHypothesis: 2-3 sentences. Where the candidate's background fits strongest and what the headline story is.
+- evaluatorLens: 1-2 sentences. Who will evaluate this resume (e.g. "An engineering manager who cares about delivery cadence and hands-on backlog ownership") and what they prioritize above all else. Be specific — not generic recruiter language.
 - riskGaps: specific gaps, not generic. Each gap should name the missing thing precisely.
 - emphasisRecommendation: pick based on the real job function, not the posted title.
 - Do not use phrases like "sits at the intersection of."`,

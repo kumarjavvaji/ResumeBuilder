@@ -32,10 +32,25 @@ export interface RawJD {
   domainSignals: string[]
 }
 
+/**
+ * 7-type gap taxonomy for Stage 1 requirement coverage.
+ * true_gap / profile_missing / parser_missing are meaningfully different action signals.
+ */
+export type GapClassification =
+  | 'true_gap'           // user genuinely lacks this; no adjacent evidence
+  | 'profile_missing'    // user may have it but profile text doesn't mention it — bridge target
+  | 'parser_missing'     // requirement may be over-detected from weak JD signal
+  | 'mapping_gap'        // user has it under a different name or framing
+  | 'wording_gap'        // user has the substance but needs JD vocabulary
+  | 'needs_confirmation' // bridge question can clarify coverage
+  | 'not_required'       // nice-to-have — deprioritize in bridge questions
+
 export interface JDRequirement {
   text: string
   category: 'technical' | 'domain' | 'soft' | 'tool' | 'process'
   userCoverageStatus: 'covered' | 'partial' | 'gap' | 'unknown'
+  /** Fine-grained gap classification. Populated for required requirements with gap/partial coverage. */
+  gapClassification?: GapClassification
   /** Where this requirement came from. */
   sourceType?: JDSourceType
   /** Brief quote from the source text that supports this requirement. */
@@ -98,10 +113,66 @@ export interface TargetIntake {
   fitHypothesis: string
   riskGaps: string[]
   emphasisRecommendation: EmphasisCategory
+  /** Structured fit analysis — persisted after Stage 1 analysis so bridge + generation can consume it. */
+  fitAnalysis?: FitAnalysis
+  /** Session-wide refinement direction — applied as background strategy to all Stage 3B refine calls. */
+  overallRefinementPrompt?: string
   // Legacy single-stage flag kept for existing sessions
   status: 'intake' | 'bridge' | 'artifact' | 'export'
   // Per-stage status for sidebar nav
   stageStatuses: SessionStageStatuses
+}
+
+/** Per-requirement fit record — preserves coverage status + gap type in one place. */
+export interface FitRequirement {
+  requirementId: string
+  requirementText: string
+  category: JDRequirement['category']
+  coverageStatus: JDRequirement['userCoverageStatus']
+  gapClassification?: GapClassification
+  supportingEvidence: string[]
+}
+
+/**
+ * Structured fit analysis derived at Stage 1 from the parsed JD + synthesis.
+ * Persisted on the session so downstream stages (bridge, generation) can consume
+ * the full structured basis without re-running the LLM.
+ */
+export interface FitAnalysis {
+  fitHypothesis: string
+  realJobFunction: string
+  /** 1-2 sentences on who evaluates this role and what they care about most. */
+  evaluatorLens: string
+  riskNotes: string[]
+  requirements: FitRequirement[]
+  gapSummary: {
+    trueGaps: string[]
+    missingFromProfile: string[]
+    needsConfirmation: string[]
+    wordingOrMapping: string[]
+  }
+  /** Requirement texts that should become bridge question targets. */
+  recommendedBridgeTargets: string[]
+  generatedAt: string
+}
+
+/** Per-session audit of how completely Stage 1→5 data is populated. */
+export interface SessionPersistenceAudit {
+  sessionId: string
+  checkedAt: string
+  profileEvidenceBulletsCount: number
+  profileSkillsCount: number
+  jdRequiredCount: number
+  jdNiceToHaveCount: number
+  fitRequirementsCount: number
+  fitAnalysisAvailable: boolean
+  gapsCount: number
+  gapBreakdown: Partial<Record<GapClassification, number>>
+  bridgeQuestionsCount: number
+  bridgeAnsweredCount: number
+  artifactSectionsGeneratedCount: number
+  artifactSectionsAcceptedCount: number
+  stage5SignalCount: number
 }
 
 /** Returns true only when Stage 1 has a valid, analyzed JD. */
@@ -414,6 +485,36 @@ export interface BlockedClaimDiagnostic {
   disposition: 'excluded' | 'downgraded' | 'requires-framing'
 }
 
+/** Learning signal emitted by the LLM during a refinement operation. */
+export interface RefinementLearningSignal {
+  type: 'jd_alignment_strategy' | 'evidence_boundary' | 'artifact_strategy' | 'calibration_pattern' | 'reusable_prompt_heuristic'
+  scope: 'user_specific' | 'global_product'
+  signal: string
+  appliesTo: SectionType[]
+}
+
+export interface RefinementEvidenceBoundary {
+  preservedClaims: string[]
+  removedOrSoftenedClaims: string[]
+  /** User instructions the LLM declined to apply because they lacked evidence support. */
+  unsupportedRequests: string[]
+}
+
+/** Immutable record of one revision. Appended to versions[] on every LLM refinement. */
+export interface ArtifactVersion {
+  versionId: string
+  versionNumber: number
+  createdAt: string
+  source: 'initial_generation' | 'llm_refinement' | 'manual_edit'
+  userInstruction?: string
+  previousText: string
+  revisedText: string
+  changeSummary: string[]
+  evidenceBoundary: RefinementEvidenceBoundary
+  confidence: 'high' | 'medium' | 'low'
+  learningSignals: RefinementLearningSignal[]
+}
+
 export interface ArtifactSection {
   id: string
   sessionId: string
@@ -453,6 +554,17 @@ export interface ArtifactSection {
   updatedAt: string
   /** Set when the user explicitly accepts. */
   acceptedAt?: string
+  /**
+   * Immutable history of every LLM refinement applied to this section.
+   * Appended on each refine; old artifacts without this field are treated as version 1.
+   */
+  versions?: ArtifactVersion[]
+  /** Change summary from the most recent LLM refinement. Cleared on accept/reject. */
+  refinementChangeSummary?: string[]
+  /** Evidence boundary from the most recent LLM refinement. */
+  refinementEvidenceBoundary?: RefinementEvidenceBoundary
+  /** Confidence rating from the most recent LLM refinement. */
+  refinementConfidence?: 'high' | 'medium' | 'low'
 }
 
 export interface ResumeArtifact {
@@ -551,10 +663,29 @@ export type ProductArea =
   | 'outreach'
   | 'formatting'
 
+// ─────────────────────────────────────────────
+// Artifact History — accepted/rejected resume content (NOT learning signals)
+// ─────────────────────────────────────────────
+
+export type ArtifactHistoryKind =
+  | 'accepted-bullet'   // bullet text that appeared on the final resume
+  | 'rejected-bullet'   // bullet the user removed from the section
+  | 'approved-metric'   // quantified fact confirmed by the user
+
+export interface ArtifactHistoryRecord {
+  id: string
+  sessionId: string
+  kind: ArtifactHistoryKind
+  content: string
+  sectionType: string
+  roleCategory?: string
+  context: string
+  createdAt: string
+}
+
+// Learning signal types: ONLY reusable generation intelligence.
+// Raw resume content (bullets, metrics) belongs in ArtifactHistoryRecord.
 export type LearningSignalType =
-  | 'accepted-bullet'
-  | 'rejected-bullet'
-  | 'approved-metric'
   | 'rejected-phrase'
   | 'role-preference'
   | 'jd-pattern'
@@ -652,6 +783,226 @@ export interface EducationEntry {
   degree: string
   field: string
   graduationYear: string
+}
+
+// ─────────────────────────────────────────────
+// Profile Snapshot — layered profile compiler
+// ─────────────────────────────────────────────
+
+export type ProfileSourceType =
+  | 'resume_upload'
+  | 'manual_intake'
+  | 'accepted_artifact'
+  | 'rejected_artifact'
+  | 'refinement_instruction'
+  | 'learning_signal'
+  | 'prior_session'
+
+export interface ProfileSource {
+  sourceId: string
+  sourceType: ProfileSourceType
+  sessionId?: string
+  artifactId?: string
+  filename?: string
+  /** SHA-256 hex digest of uploaded file content. Used to detect duplicate uploads. */
+  contentHash?: string
+  extractedAt: string
+}
+
+export type ClaimCategory =
+  | 'role'
+  | 'responsibility'
+  | 'achievement'
+  | 'metric'
+  | 'domain'
+  | 'tool'
+  | 'method'
+  | 'constraint'
+  | 'preference'
+
+export interface ArtifactLink {
+  artifactId: string
+  sectionType: SectionType
+  claimId: string
+  linkType: 'source' | 'supported_by' | 'conflicts_with' | 'supersedes'
+}
+
+export interface ProfileClaim {
+  claimId: string
+  /** Lowercase, punctuation-stripped stable key for deduplication. */
+  normalizedKey: string
+  text: string
+  category: ClaimCategory
+  evidenceStrength: 'strong' | 'medium' | 'weak'
+  sourceIds: string[]
+  artifactLinks: ArtifactLink[]
+  firstSeenAt: string
+  lastSeenAt: string
+  status: 'active' | 'superseded' | 'conflicting' | 'archived'
+}
+
+export type ClaimOverlapType =
+  | 'duplicate'
+  | 'near_duplicate'
+  | 'same_evidence_different_wording'
+  | 'conflict'
+
+export type ClaimResolution = 'merged' | 'linked' | 'kept_separate' | 'needs_review'
+
+export interface ClaimOverlap {
+  overlapId: string
+  canonicalClaimId: string
+  overlappingClaimIds: string[]
+  overlapType: ClaimOverlapType
+  resolution: ClaimResolution
+}
+
+export interface ProfileConflict {
+  conflictId: string
+  claimIds: string[]
+  description: string
+  detectedAt: string
+}
+
+export interface ProfileIdentity {
+  fullName: string
+  email: string
+  phone: string
+  location: string
+  linkedIn: string
+}
+
+export interface ProfileSkill {
+  skillId: string
+  name: string
+  normalizedKey: string
+  /** ATS skill group heading (e.g. "Analysis", "Tools"). */
+  grouping?: string
+  sourceIds: string[]
+  evidenceStrength: 'strong' | 'medium' | 'weak'
+}
+
+export interface ProfileDomain {
+  domainId: string
+  name: string
+  normalizedKey: string
+  sourceIds: string[]
+}
+
+export interface ProfileRoleSignal {
+  roleId: string
+  title: string
+  normalizedKey: string
+  company: string
+  startDate: string
+  endDate: string
+  sourceIds: string[]
+}
+
+export interface ProfileMetric {
+  metricId: string
+  text: string
+  normalizedKey: string
+  context?: string
+  sourceIds: string[]
+}
+
+export interface ProfileTool {
+  toolId: string
+  name: string
+  normalizedKey: string
+  category?: string
+  sourceIds: string[]
+}
+
+export interface ProfileConstraint {
+  constraintId: string
+  text: string
+  sourceIds: string[]
+}
+
+/** Tracks refinement instructions that survive uploads and session resets. */
+export interface SnapshotRefinementDirection {
+  directionId: string
+  text: string
+  /** Section type this direction applies to, or 'global' for all sections. */
+  appliesTo: SectionType | 'global'
+  sourceId: string
+  accepted: boolean
+  createdAt: string
+}
+
+/** Learning signal stored within a ProfileSnapshot for durability. */
+export interface SnapshotLearningSignal {
+  signalId: string
+  type: LearningSignalType
+  scope: 'user_specific' | 'global_product'
+  text: string
+  sourceIds: string[]
+  /** Which section types this signal applies to. */
+  appliesTo: string[]
+  confidence: 'high' | 'medium' | 'low'
+  createdAt: string
+}
+
+export interface ProfileSnapshotDimensions {
+  identity: ProfileIdentity
+  experienceClaims: ProfileClaim[]
+  skills: ProfileSkill[]
+  domains: ProfileDomain[]
+  roles: ProfileRoleSignal[]
+  metrics: ProfileMetric[]
+  tools: ProfileTool[]
+  constraints: ProfileConstraint[]
+  artifactHistory: ArtifactLink[]
+  refinementDirections: SnapshotRefinementDirection[]
+  learningSignals: SnapshotLearningSignal[]
+}
+
+/**
+ * Versioned aggregate of all profile evidence accumulated across sessions and uploads.
+ * Never mutated in place — each intake produces a new version.
+ */
+export interface ProfileSnapshot {
+  profileId: string
+  version: number
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+  dimensions: ProfileSnapshotDimensions
+  sourceIndex: ProfileSource[]
+  overlapIndex: ClaimOverlap[]
+  unresolvedConflicts: ProfileConflict[]
+}
+
+export interface ProfileDelta {
+  addedClaims: ProfileClaim[]
+  addedSkills: ProfileSkill[]
+  addedTools: ProfileTool[]
+  addedMetrics: ProfileMetric[]
+  mergedClaims: ClaimOverlap[]
+  linkedArtifacts: ArtifactLink[]
+  preservedDirections: SnapshotRefinementDirection[]
+  preservedLearningSignals: SnapshotLearningSignal[]
+  unresolvedConflicts: ProfileConflict[]
+  profileVersionBefore: number
+  profileVersionAfter: number
+}
+
+/**
+ * Focused slice of the ProfileSnapshot returned to artifact generators.
+ * Only contains evidence relevant to the target role and artifact type.
+ */
+export interface ProfileProjection {
+  relevantClaims: ProfileClaim[]
+  relevantMetrics: ProfileMetric[]
+  relevantSkills: ProfileSkill[]
+  relevantTools: ProfileTool[]
+  roleTranslationHints: SnapshotLearningSignal[]
+  refinementDirections: SnapshotRefinementDirection[]
+  evidenceBoundaries: SnapshotLearningSignal[]
+  constraints: ProfileConstraint[]
+  unresolvedConflicts: ProfileConflict[]
 }
 
 // ─────────────────────────────────────────────

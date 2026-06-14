@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import type { ArtifactSection, ResumeBullet, BulletPartition, SectionType, ArtifactGenerationProvenance } from '@/contracts'
+import type { ArtifactSection, ResumeBullet, BulletPartition, SectionType, ArtifactGenerationProvenance, RefinementEvidenceBoundary } from '@/contracts'
 import { isGlobalEvidenceWarning } from '@/lib/evidence-scope'
 import { formatCalibrationInfluenceLine } from '@/lib/calibration/influence'
 import { Badge } from '@/components/shared/badge'
@@ -127,6 +127,89 @@ function CalibrationInfluenceAudit({ section }: { section: ArtifactSection }) {
               </li>
             ))}
           </ul>
+        </details>
+      )}
+    </div>
+  )
+}
+
+function RefinementReviewPanel({
+  changeSummary,
+  evidenceBoundary,
+  confidence,
+}: {
+  changeSummary: string[]
+  evidenceBoundary?: RefinementEvidenceBoundary
+  confidence?: 'high' | 'medium' | 'low'
+}) {
+  const confidenceColor =
+    confidence === 'high' ? 'text-green-400' :
+    confidence === 'low' ? 'text-amber-400' : 'text-blue-400'
+
+  return (
+    <div className="space-y-2 px-3 py-2.5 bg-blue-950/20 border border-blue-900/40 rounded text-xs">
+      <div className="flex items-center gap-2">
+        <span className="text-blue-300 font-medium">Refinement review</span>
+        {confidence && (
+          <span className={cn('font-medium', confidenceColor)}>
+            · confidence: {confidence}
+          </span>
+        )}
+      </div>
+
+      {changeSummary.length > 0 && (
+        <div>
+          <p className="text-gray-400 mb-1">What changed:</p>
+          <ul className="space-y-0.5">
+            {changeSummary.map((c, i) => (
+              <li key={i} className="text-gray-300 pl-2 border-l border-blue-800">· {c}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {evidenceBoundary && (
+        <details className="text-xs">
+          <summary className="text-gray-500 cursor-pointer hover:text-gray-400 select-none">
+            Evidence boundary
+            {evidenceBoundary.unsupportedRequests.length > 0 && (
+              <span className="ml-1 text-amber-500">
+                · {evidenceBoundary.unsupportedRequests.length} request{evidenceBoundary.unsupportedRequests.length !== 1 ? 's' : ''} declined
+              </span>
+            )}
+          </summary>
+          <div className="mt-1.5 space-y-1.5">
+            {evidenceBoundary.preservedClaims.length > 0 && (
+              <div>
+                <p className="text-gray-600">Preserved claims:</p>
+                <ul className="pl-2">
+                  {evidenceBoundary.preservedClaims.map((c, i) => (
+                    <li key={i} className="text-gray-500">· {c}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {evidenceBoundary.removedOrSoftenedClaims.length > 0 && (
+              <div>
+                <p className="text-gray-600">Removed or softened:</p>
+                <ul className="pl-2">
+                  {evidenceBoundary.removedOrSoftenedClaims.map((c, i) => (
+                    <li key={i} className="text-amber-600">· {c}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {evidenceBoundary.unsupportedRequests.length > 0 && (
+              <div>
+                <p className="text-amber-500 font-medium">Declined (unsupported):</p>
+                <ul className="pl-2">
+                  {evidenceBoundary.unsupportedRequests.map((c, i) => (
+                    <li key={i} className="text-amber-600">· {c}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
         </details>
       )}
     </div>
@@ -390,7 +473,7 @@ export function ArtifactSectionCard({
           {isAccepted ? (
             <p className="text-xs text-green-500 font-medium">
               Accepted{section.acceptedAt ? ` · ${new Date(section.acceptedAt).toLocaleDateString()}` : ''}
-              {' — '}use "Request Changes" above to revise.
+              {' — '}use "Request Changes" in the section header to revise with a specific instruction.
             </p>
           ) : (
             <div className="flex flex-wrap gap-2">
@@ -442,12 +525,24 @@ export function ArtifactSectionCard({
         </div>
       )}
 
+      {/* Refinement review panel — shown after LLM refinement, before accept */}
+      {section.status === 'needs_review' && section.refinementChangeSummary && section.refinementChangeSummary.length > 0 && !refineMode && (
+        <RefinementReviewPanel
+          changeSummary={section.refinementChangeSummary}
+          evidenceBoundary={section.refinementEvidenceBoundary}
+          confidence={section.refinementConfidence}
+        />
+      )}
+
       {/* Refine panel */}
       {refineMode && (
         <div className="space-y-2 pt-1">
+          <p className="text-xs text-gray-500">
+            Tell the AI what to improve — this is instruction, not replacement text.
+          </p>
           <textarea
-            className={`${textareaCls} h-16 text-xs text-gray-200 bg-gray-900`}
-            placeholder="Describe what to change — e.g. 'Strengthen the metrics in bullet 2' or 'Make the tone more direct'"
+            className={`${textareaCls} h-20 text-xs text-gray-200 bg-gray-900`}
+            placeholder="Tell the AI what to improve: tighter BA framing, more credit-union language, reduce QA by 30%, remove puff language, preserve metrics."
             value={refineDraft}
             onChange={e => setRefineDraft(e.target.value)}
           />

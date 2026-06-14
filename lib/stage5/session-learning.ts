@@ -55,12 +55,9 @@ export interface BuildStage5LearningReportOptions {
   storedSignals?: LearningSignal[]
 }
 
-const FACT_TYPES = new Set<LearningSignalType>([
-  'accepted-bullet',
-  'approved-metric',
-  'rejected-bullet',
-  'rejected-phrase'
-])
+// Signals that are negative generation constraints (kept in learningSignals so future
+// generation can avoid these phrases).
+const NEGATIVE_CONSTRAINT_TYPES = new Set<LearningSignalType>(['rejected-phrase'])
 
 const PRIVATE_PLACEHOLDER = '[private]'
 
@@ -71,7 +68,7 @@ export function buildStage5LearningReport(opts: BuildStage5LearningReportOptions
     ...buildStage1Signals(opts.session),
     ...buildStage2Signals(opts.bridgeQuestions),
     ...buildStage3ASignals(opts.appliedCalibration, accepted),
-    ...buildStage3BSignals(accepted),
+    ...buildStage3BSignals(accepted, opts.session),
     ...buildStage4Signals(opts.stage4RawText),
     ...buildStoredMetaSignals(opts.storedSignals ?? [])
   ]
@@ -92,16 +89,18 @@ export function buildStage5LearningReport(opts: BuildStage5LearningReportOptions
   }
 }
 
+// All stored learning signals are now generation rules; none are raw content.
+// This function filters out the negative-constraint category so the strategy
+// view only shows actionable generation heuristics.
 export function primaryLearningSignals(report: Stage5LearningReport): Stage5MetaSignal[] {
-  return report.signals.filter(s => !FACT_TYPES.has(s.type))
+  return report.signals.filter(s => !NEGATIVE_CONSTRAINT_TYPES.has(s.type))
 }
 
-export function artifactFactsFromSignals(signals: LearningSignal[]): Stage5ArtifactFacts {
+// Reads rejected phrases from stored signals (the only content-adjacent type still in
+// learningSignals — they are genuine negative generation constraints, not resume content).
+export function artifactFactsFromSignals(signals: LearningSignal[]): Pick<Stage5ArtifactFacts, 'rejectedPhrases'> {
   return {
-    acceptedBullets: signals.filter(s => s.type === 'accepted-bullet').map(s => s.content),
-    acceptedSkills: signals.filter(s => s.type === 'approved-metric' && s.sectionType === 'skills').map(s => s.content),
-    approvedMetrics: signals.filter(s => s.type === 'approved-metric' && s.sectionType !== 'skills').map(s => s.content),
-    rejectedPhrases: signals.filter(s => s.type === 'rejected-phrase').map(s => s.content)
+    rejectedPhrases: signals.filter(s => s.type === 'rejected-phrase').map(s => s.content),
   }
 }
 
@@ -126,7 +125,8 @@ export function sanitizeGlobalLearning(content: string, opts: { profile?: UserPr
 }
 
 function buildArtifactFacts(opts: BuildStage5LearningReportOptions, accepted: ArtifactSection[]): Stage5ArtifactFacts {
-  const stored = artifactFactsFromSignals(opts.storedSignals ?? [])
+  // Bullets and skills come from live accepted artifact sections — no longer from
+  // storedSignals, since accepted-bullet/rejected-bullet now live in artifactHistory.
   const bullets = accepted.flatMap(s =>
     s.bullets
       .filter(b => (b.partition ?? 'display') === 'display')
@@ -137,12 +137,14 @@ function buildArtifactFacts(opts: BuildStage5LearningReportOptions, accepted: Ar
     .filter(s => s.type === 'skills')
     .flatMap(s => s.content.split('\n').map(line => line.trim()).filter(Boolean))
   const metrics = opts.profile?.workHistory.flatMap(w => w.approvedMetrics) ?? []
+  // Rejected phrases remain in storedSignals as negative generation constraints.
+  const { rejectedPhrases } = artifactFactsFromSignals(opts.storedSignals ?? [])
 
   return {
-    acceptedBullets: unique([...stored.acceptedBullets, ...bullets]),
-    acceptedSkills: unique([...stored.acceptedSkills, ...skills]),
-    approvedMetrics: unique([...stored.approvedMetrics, ...metrics]),
-    rejectedPhrases: unique(stored.rejectedPhrases)
+    acceptedBullets: unique(bullets),
+    acceptedSkills: unique(skills),
+    approvedMetrics: unique(metrics),
+    rejectedPhrases: unique(rejectedPhrases),
   }
 }
 
@@ -243,7 +245,7 @@ function buildStage3ASignals(applied: AppliedCalibrationState | undefined, accep
   return signals
 }
 
-function buildStage3BSignals(accepted: ArtifactSection[]): Stage5MetaSignal[] {
+function buildStage3BSignals(accepted: ArtifactSection[], session: TargetIntake): Stage5MetaSignal[] {
   const signals: Stage5MetaSignal[] = []
   const diagnostics = accepted.flatMap(s => s.blockedClaimDiagnostics ?? [])
   const sectionsWithDisplay = accepted.filter(s => s.bullets.some(b => (b.partition ?? 'display') === 'display'))
@@ -269,7 +271,35 @@ function buildStage3BSignals(accepted: ArtifactSection[]): Stage5MetaSignal[] {
     ))
   }
 
+  // Derive a reusable generation rule from the pattern of accepted bullets.
+  // This replaces raw bullet storage with an actionable strategy signal.
+  const derived = derivePatternSignalFromBullets(accepted, session)
+  if (derived) signals.push(derived)
+
   return signals
+}
+
+// Analyzes the pattern of accepted bullets and produces a single reusable generation
+// heuristic only when a dominant section pattern is identifiable.
+function derivePatternSignalFromBullets(accepted: ArtifactSection[], session: TargetIntake): Stage5MetaSignal | null {
+  const allBullets = accepted.flatMap(s =>
+    s.bullets
+      .filter(b => (b.partition ?? 'display') === 'display' && b.approved !== false)
+      .map(b => ({ section: s.type, text: b.text }))
+  )
+  if (allBullets.length < 2) return null
+
+  // Find the section with the most accepted bullets.
+  const counts = new Map<string, number>()
+  for (const { section } of allBullets) counts.set(section, (counts.get(section) ?? 0) + 1)
+  const [[dominantSection, count]] = [...counts.entries()].sort((a, b) => b[1] - a[1])
+
+  return signal(
+    'stage3b',
+    'personal',
+    'artifact_strategy',
+    `For ${session.emphasisRecommendation} roles, lead with ${labelSection(dominantSection)} evidence — ${count} bullet(s) were accepted there for ${session.roleTitle}. Prioritize this section in future artifact generation for similar roles.`
+  )
 }
 
 function buildStage4Signals(stage4: Stage4RawResumeText | undefined): Stage5MetaSignal[] {
@@ -286,7 +316,7 @@ function buildStage4Signals(stage4: Stage4RawResumeText | undefined): Stage5Meta
 
 function buildStoredMetaSignals(signals: LearningSignal[]): Stage5MetaSignal[] {
   return signals
-    .filter(s => !FACT_TYPES.has(s.type))
+    .filter(s => !NEGATIVE_CONSTRAINT_TYPES.has(s.type))
     .map(s => signal(
       'stage3b',
       s.scope,

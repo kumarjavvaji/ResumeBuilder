@@ -1,5 +1,5 @@
 import { db } from './db'
-import type { ArtifactSection, ResumeArtifact, SectionType } from '@/contracts'
+import type { ArtifactSection, ArtifactVersion, ResumeArtifact, SectionType } from '@/contracts'
 import { nanoid } from './nanoid'
 
 export async function saveArtifactSection(
@@ -15,6 +15,37 @@ export async function saveArtifactSection(
     ...section,
     id: existing?.id ?? nanoid(),
     version: (existing?.version ?? 0) + 1,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now
+  }
+  await db.artifactSections.put(full)
+  return full
+}
+
+/**
+ * Saves a refined artifact section, preserving the previous content in versions[].
+ * The new ArtifactVersion is appended to the front of the list (newest-first).
+ * Old artifacts without versions[] are treated as version 1 for backward compat.
+ */
+export async function saveRefinedArtifactSection(
+  section: Omit<ArtifactSection, 'id' | 'createdAt' | 'updatedAt' | 'version'>,
+  newVersion: ArtifactVersion
+): Promise<ArtifactSection> {
+  const now = new Date().toISOString()
+  const existing = await db.artifactSections
+    .where('sessionId').equals(section.sessionId)
+    .and(s => s.type === section.type)
+    .first()
+
+  // Preserve existing version history; add the new version entry
+  const existingVersions: ArtifactVersion[] = existing?.versions ?? []
+  const versions: ArtifactVersion[] = [newVersion, ...existingVersions]
+
+  const full: ArtifactSection = {
+    ...section,
+    id: existing?.id ?? nanoid(),
+    version: (existing?.version ?? 0) + 1,
+    versions,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now
   }
