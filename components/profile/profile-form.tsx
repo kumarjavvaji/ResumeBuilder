@@ -1,13 +1,15 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { getUserProfile, saveUserProfile } from '@/lib/storage/user-profile'
-import type { UserProfile, WorkEntry, EducationEntry, SkillGroup } from '@/contracts'
+import type { UserProfile, WorkEntry, SkillGroup } from '@/contracts'
 import { nanoid } from '@/lib/storage/nanoid'
 import { Spinner } from '@/components/shared/spinner'
-import { ResumeUpload } from './resume-upload'
+import { ProfileEvidenceUpload } from './profile-evidence-upload'
 import { SkillGroupEditor } from './skill-group-editor'
 import { inputCls, textareaCls } from '@/lib/input-cls'
 import { emptySkillGroups } from '@/lib/skills/classify'
+
+type ParsedBasics = Omit<UserProfile, 'id' | 'updatedAt' | 'constraints' | 'rejectedPhrases'>
 
 const EMPTY_PROFILE: Omit<UserProfile, 'id' | 'updatedAt'> = {
   fullName: '',
@@ -44,7 +46,7 @@ export function ProfileForm() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
-  const [importBanner, setImportBanner] = useState(false)
+  const [prefillBanner, setPrefillBanner] = useState(false)
 
   useEffect(() => {
     getUserProfile().then(p => {
@@ -62,6 +64,33 @@ export function ProfileForm() {
     setSaving(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
+  }
+
+  /**
+   * Prefill handler — only writes fields that are currently empty.
+   * Never overwrites existing user-entered data.
+   */
+  function handlePrefillRequest(parsed: ParsedBasics) {
+    setProfile(p => ({
+      ...p,
+      fullName: p.fullName || parsed.fullName || p.fullName,
+      email: p.email || parsed.email || p.email,
+      phone: p.phone || parsed.phone || p.phone,
+      location: p.location || parsed.location || p.location,
+      linkedIn: p.linkedIn || parsed.linkedIn || p.linkedIn,
+      summary: p.summary || parsed.summary || p.summary,
+      workHistory: p.workHistory.length === 0 ? (parsed.workHistory ?? []) : p.workHistory,
+      education: p.education.length === 0 ? (parsed.education ?? []) : p.education,
+      // skillGroups and skills: only prefill if user hasn't added any groups yet
+      skillGroups: (p.skillGroups ?? []).every(g => g.skills.length === 0)
+        ? (parsed.skillGroups ?? p.skillGroups)
+        : p.skillGroups,
+      // Preserve constraints and rejected phrases — user preferences, never overwritten
+      constraints: p.constraints,
+      rejectedPhrases: p.rejectedPhrases,
+    }))
+    setPrefillBanner(true)
+    setTimeout(() => setPrefillBanner(false), 4000)
   }
 
   function addWorkEntry() {
@@ -92,32 +121,24 @@ export function ProfileForm() {
     setProfile(p => ({ ...p, workHistory: p.workHistory.filter(w => w.id !== id) }))
   }
 
-  function handleParsed(parsed: Omit<UserProfile, 'id' | 'updatedAt' | 'constraints' | 'rejectedPhrases'>) {
-    setProfile(p => ({
-      ...p,
-      ...parsed,
-      // Preserve existing constraints and rejected phrases — don't overwrite user preferences
-      constraints: p.constraints,
-      rejectedPhrases: p.rejectedPhrases
-    }))
-    setImportBanner(true)
-    setTimeout(() => setImportBanner(false), 4000)
-  }
-
   if (loading) return <div className="flex justify-center py-16"><Spinner /></div>
 
   return (
     <div className="space-y-10">
-      {/* Upload option */}
+
+      {/* Resume evidence upload — single upload surface */}
       <section>
-        <div className="flex items-center gap-3 mb-4">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">Import from Resume</h2>
-          <span className="text-xs text-gray-400">— or fill in manually below</span>
+        <div className="mb-4">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">Add Resume Evidence</h2>
+          <p className="mt-1 text-xs text-gray-400">
+            Upload a resume to add claims, skills, metrics, and role evidence to your profile.
+            Existing profile data is preserved — only new evidence is added.
+          </p>
         </div>
-        <ResumeUpload onParsed={handleParsed} />
-        {importBanner && (
-          <div className="mt-3 px-4 py-2.5 bg-green-50 border border-green-200 rounded text-sm text-green-700">
-            Resume imported. Review each section below, then save.
+        <ProfileEvidenceUpload onPrefillRequest={handlePrefillRequest} />
+        {prefillBanner && (
+          <div className="mt-3 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded text-sm text-blue-700">
+            Empty fields filled from resume. Review below, then save.
           </div>
         )}
       </section>

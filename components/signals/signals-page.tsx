@@ -8,9 +8,6 @@ import { inputCls, textareaCls } from '@/lib/input-cls'
 // ── Labels ────────────────────────────────────────────────────────────────
 
 const TYPE_LABELS: Record<LearningSignalType, string> = {
-  'accepted-bullet': 'Accepted Bullet',
-  'rejected-bullet': 'Rejected Bullet',
-  'approved-metric': 'Approved Metric',
   'rejected-phrase': 'Rejected Phrase',
   'role-preference': 'Role Preference',
   'jd-pattern': 'JD Pattern',
@@ -45,9 +42,6 @@ const PRODUCT_AREA_LABELS: Record<ProductArea, string> = {
 }
 
 const TYPE_COLORS: Partial<Record<LearningSignalType, string>> = {
-  'accepted-bullet': 'bg-green-100 text-green-700',
-  'rejected-bullet': 'bg-red-100 text-red-700',
-  'approved-metric': 'bg-blue-100 text-blue-700',
   'rejected-phrase': 'bg-orange-100 text-orange-700',
   'role-preference': 'bg-purple-100 text-purple-700',
   'jd-pattern': 'bg-gray-100 text-gray-700',
@@ -208,7 +202,7 @@ function SignalRow({
   }[signal.scope]
 
   const isPromotable = signal.scope === 'personal' &&
-    ['accepted-bullet', 'approved-metric', 'role-preference', 'style-constraint'].includes(signal.type)
+    ['role-preference', 'style-constraint', 'personal_positioning_rule', 'artifact_strategy'].includes(signal.type)
 
   return (
     <div className="border border-gray-100 rounded-lg px-4 py-3 space-y-2">
@@ -299,7 +293,7 @@ export function SignalsPage() {
         <a href="/" className="text-sm text-gray-500 hover:text-gray-700">← Home</a>
         <h1 className="text-2xl font-bold mt-3">Learning Signals</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Intelligence accumulated from your sessions. Personal signals improve your future applications. Global signals improve the product for everyone.
+          Reusable generation rules accumulated from your sessions. These change how ResumeBuilder generates, reduces, prioritizes, and guards future resumes. Accepted bullets and resume content are in Artifact History — not here.
         </p>
       </div>
 
@@ -308,7 +302,7 @@ export function SignalsPage() {
         <div className="border border-gray-200 rounded-lg px-4 py-3">
           <div className="text-2xl font-bold">{personalCount}</div>
           <div className="text-xs text-gray-500 mt-0.5">Personal signals</div>
-          <div className="text-xs text-gray-400 mt-1">Your resume positioning, approved bullets, rejected phrases</div>
+          <div className="text-xs text-gray-400 mt-1">Your resume positioning rules, rejected phrases, generation heuristics</div>
         </div>
         <div className="border border-violet-200 rounded-lg px-4 py-3">
           <div className="text-2xl font-bold text-violet-700">{globalCount}</div>
@@ -354,7 +348,7 @@ export function SignalsPage() {
       ) : filtered.length === 0 ? (
         <p className="text-sm text-gray-400 py-8 text-center">
           {signals.length === 0
-            ? 'No signals yet. Accept or reject artifacts to build your signal library.'
+            ? 'No generation rules yet. Complete a session to build your signal library. Accepted bullets live in Artifact History, not here.'
             : 'No signals match the current filter.'}
         </p>
       ) : (

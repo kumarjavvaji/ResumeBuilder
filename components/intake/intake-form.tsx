@@ -11,6 +11,7 @@ import type {
   RawJD,
   JDRequirementMap,
   DomainIQImport,
+  FitAnalysis,
 } from '@/contracts'
 import { deriveStageStatuses, canCompleteStage1 } from '@/contracts'
 import { Spinner } from '@/components/shared/spinner'
@@ -432,12 +433,23 @@ function tryParseDomainIQJson(raw: string): {
 } | null {
   try {
     const parsed = JSON.parse(raw.trim())
+    // Legacy flat format
     if (typeof parsed.companyProfile === 'string' && Array.isArray(parsed.industrySignals)) {
       return {
         companyProfile: parsed.companyProfile ?? '',
         industrySignals: parsed.industrySignals ?? [],
         techStack: parsed.techStack ?? [],
         cultureSignals: parsed.cultureSignals ?? [],
+      }
+    }
+    // New diq_stage3_resume_builder_basis format
+    const exp = parsed.export
+    if (exp?.exportKind === 'diq_stage3_resume_builder_basis') {
+      return {
+        companyProfile: exp.domainBasis?.thesis ?? '',
+        industrySignals: exp.domainBasis?.keyThemes ?? [],
+        techStack: [],
+        cultureSignals: exp.resumePositioningBasis?.businessConcepts ?? [],
       }
     }
   } catch {}
@@ -639,6 +651,7 @@ export function IntakeForm() {
   const [fetchFailMessage, setFetchFailMessage] = useState('')
 
   const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState<null | Awaited<ReturnType<typeof runIntake>>>(null)
 
@@ -694,30 +707,43 @@ export function IntakeForm() {
   async function handleSave() {
     if (!result) return
     if (!canCompleteStage1(stage1Status)) return
-    const profile = await getUserProfile()
-    if (!profile) return
+    if (saving) return
 
-    const session: TargetIntake = {
-      id: nanoid(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      roleTitle,
-      company,
-      postingUrl: jdLink.trim() || undefined,
-      jdSourceType,
-      stage1Status: 'complete',
-      domainIQInsights: result.domainIQ,
-      jobDescription: result.rawJD,
-      jdRequirementMap: result.requirementMap,
-      companySummary: result.synthesis.companySummary,
-      fitHypothesis: result.synthesis.fitHypothesis,
-      riskGaps: result.synthesis.riskGaps,
-      emphasisRecommendation: result.synthesis.emphasisRecommendation,
-      status: 'intake',
-      stageStatuses: deriveStageStatuses('intake'),
+    setError('')
+    setSaving(true)
+    try {
+      const profile = await getUserProfile()
+      if (!profile) {
+        setError('Please complete your profile before saving a session.')
+        return
+      }
+
+      const session: TargetIntake = {
+        id: nanoid(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        roleTitle,
+        company,
+        postingUrl: jdLink.trim() || undefined,
+        jdSourceType,
+        stage1Status: 'complete',
+        domainIQInsights: result.domainIQ,
+        jobDescription: result.rawJD,
+        jdRequirementMap: result.requirementMap,
+        companySummary: result.synthesis.companySummary,
+        fitHypothesis: result.synthesis.fitHypothesis,
+        riskGaps: result.synthesis.riskGaps,
+        emphasisRecommendation: result.synthesis.emphasisRecommendation,
+        fitAnalysis: result.fitAnalysis,
+        status: 'intake',
+        stageStatuses: deriveStageStatuses('intake'),
+      }
+      await saveSession(session)
+      router.push(`/sessions/${session.id}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save session. Please try again.')
+      setSaving(false)
     }
-    await saveSession(session)
-    router.push(`/sessions/${session.id}`)
   }
 
   async function handleSaveDraft() {
@@ -799,9 +825,11 @@ export function IntakeForm() {
           // Analysis done — show save CTA
           <button
             onClick={handleSave}
-            className="px-5 py-2 bg-green-700 text-white rounded text-sm font-medium hover:bg-green-600"
+            disabled={saving}
+            className="px-5 py-2 bg-green-700 text-white rounded text-sm font-medium hover:bg-green-600 disabled:opacity-50 flex items-center gap-2"
           >
-            Save Stage 1 and Continue to Bridge Questions →
+            {saving && <Spinner className="text-white" />}
+            {saving ? 'Saving…' : 'Save Stage 1 and Continue →'}
           </button>
         ) : (
           // Default — Analyze JD button
@@ -905,8 +933,10 @@ async function runIntake(
     synthesis: {
       companySummary: string
       fitHypothesis: string
+      evaluatorLens: string
       riskGaps: string[]
       emphasisRecommendation: import('@/contracts').EmphasisCategory
     }
+    fitAnalysis: FitAnalysis
   }>
 }

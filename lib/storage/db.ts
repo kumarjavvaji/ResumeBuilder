@@ -6,6 +6,7 @@ import type {
   ArtifactSection,
   ResumeArtifact,
   LearningSignal,
+  ArtifactHistoryRecord,
   OutreachTarget,
   MarketProfile,
   ExportPackage,
@@ -13,7 +14,8 @@ import type {
   CalibrationReference,
   CalibrationCandidate,
   CalibrationSynthesisRecord,
-  AppliedCalibrationState
+  AppliedCalibrationState,
+  ProfileSnapshot
 } from '@/contracts'
 import { deriveStageStatuses } from '@/contracts'
 import { migrateToSkillGroups } from '@/lib/skills/classify'
@@ -25,6 +27,7 @@ export class ResumeBuilderDB extends Dexie {
   artifactSections!: Table<ArtifactSection>
   artifacts!: Table<ResumeArtifact>
   learningSignals!: Table<LearningSignal>
+  artifactHistory!: Table<ArtifactHistoryRecord>
   outreachTargets!: Table<OutreachTarget>
   marketProfiles!: Table<MarketProfile>
   exportPackages!: Table<ExportPackage>
@@ -33,6 +36,7 @@ export class ResumeBuilderDB extends Dexie {
   calibrationCandidates!: Table<CalibrationCandidate>
   calibrationSyntheses!: Table<CalibrationSynthesisRecord>
   appliedCalibrationStates!: Table<AppliedCalibrationState>
+  profileSnapshots!: Table<ProfileSnapshot>
 
   constructor() {
     super('resume-builder')
@@ -109,6 +113,41 @@ export class ResumeBuilderDB extends Dexie {
     // v8: stores Stage 4 raw resume text assemblies.
     this.version(8).stores({
       stage4RawResumeTexts: 'id, sessionId, status, updatedAt'
+    })
+
+    // v9: versioned profile snapshots for the layered profile compiler.
+    //     profileId is always 'primary' (singleton user). version increments on each intake.
+    this.version(9).stores({
+      profileSnapshots: 'profileId, version, isActive'
+    })
+
+    // v10: adds artifactHistory table for accepted/rejected resume content.
+    //      Migrates legacy accepted-bullet and rejected-bullet records out of
+    //      learningSignals (where they polluted the generation signal store) and
+    //      deletes them from learningSignals.
+    this.version(10).stores({
+      artifactHistory: 'id, sessionId, kind, sectionType, createdAt'
+    }).upgrade(async tx => {
+      const polluted = await tx.table('learningSignals')
+        .filter((s: LearningSignal & { type: string }) =>
+          s.type === 'accepted-bullet' || s.type === 'rejected-bullet' || s.type === 'approved-metric'
+        )
+        .toArray()
+
+      if (polluted.length > 0) {
+        const historyRecords: ArtifactHistoryRecord[] = polluted.map((s: LearningSignal & { type: string }) => ({
+          id: `migrated_${s.id}`,
+          sessionId: '',
+          kind: s.type as ArtifactHistoryRecord['kind'],
+          content: s.content,
+          sectionType: s.sectionType ?? 'unknown',
+          roleCategory: s.roleCategory,
+          context: s.context,
+          createdAt: s.createdAt,
+        }))
+        await tx.table('artifactHistory').bulkAdd(historyRecords)
+        await tx.table('learningSignals').bulkDelete(polluted.map((s: LearningSignal) => s.id))
+      }
     })
   }
 }

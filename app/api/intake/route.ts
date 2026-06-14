@@ -1,9 +1,46 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { parseJobDescription } from '@/lib/llm/parse-jd'
 import { parseDomainIQ } from '@/lib/llm/parse-domainiq'
-import { generateIntakeSynthesis } from '@/lib/llm/generate-intake'
+import { generateIntakeSynthesis, type IntakeSynthesis } from '@/lib/llm/generate-intake'
 import { validateJDContent } from '@/lib/validators/jd-content'
-import type { UserProfile, JDSourceType } from '@/contracts'
+import type { UserProfile, JDSourceType, JDRequirementMap, FitAnalysis, FitRequirement } from '@/contracts'
+
+function buildFitAnalysis(jdMap: JDRequirementMap, synthesis: IntakeSynthesis): FitAnalysis {
+  const requirements: FitRequirement[] = jdMap.required.map((r, i) => ({
+    requirementId: `req-${i}`,
+    requirementText: r.text,
+    category: r.category,
+    coverageStatus: r.userCoverageStatus,
+    gapClassification: r.gapClassification,
+    supportingEvidence: r.profileEvidence ? [r.profileEvidence] : [],
+  }))
+
+  const gapSummary = {
+    trueGaps: requirements
+      .filter(r => r.gapClassification === 'true_gap')
+      .map(r => r.requirementText),
+    missingFromProfile: requirements
+      .filter(r => r.gapClassification === 'profile_missing')
+      .map(r => r.requirementText),
+    needsConfirmation: requirements
+      .filter(r => r.gapClassification === 'needs_confirmation')
+      .map(r => r.requirementText),
+    wordingOrMapping: requirements
+      .filter(r => r.gapClassification === 'wording_gap' || r.gapClassification === 'mapping_gap')
+      .map(r => r.requirementText),
+  }
+
+  return {
+    fitHypothesis: synthesis.fitHypothesis,
+    realJobFunction: jdMap.realJobFunction,
+    evaluatorLens: synthesis.evaluatorLens ?? '',
+    riskNotes: synthesis.riskGaps,
+    requirements,
+    gapSummary,
+    recommendedBridgeTargets: jdMap.needsEvidenceItems,
+    generatedAt: new Date().toISOString(),
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -44,12 +81,14 @@ export async function POST(req: NextRequest) {
     ])
 
     const synthesis = await generateIntakeSynthesis(parsed.requirementMap, domainIQ, profile)
+    const fitAnalysis = buildFitAnalysis(parsed.requirementMap, synthesis)
 
     return NextResponse.json({
       rawJD: parsed.rawJD,
       requirementMap: parsed.requirementMap,
       domainIQ,
       synthesis,
+      fitAnalysis,
     })
   } catch (err) {
     console.error('intake route error:', err)

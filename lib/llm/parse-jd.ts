@@ -1,5 +1,5 @@
 import { anthropic, MODEL } from './client'
-import type { JDRequirementMap, JDRequirement, RawJD, JDSourceType } from '@/contracts'
+import type { JDRequirementMap, JDRequirement, RawJD, JDSourceType, GapClassification } from '@/contracts'
 
 const TOOL_SCHEMA = {
   name: 'parse_job_description',
@@ -37,6 +37,11 @@ const TOOL_SCHEMA = {
                 userCoverageStatus: {
                   type: 'string',
                   enum: ['covered', 'partial', 'gap', 'unknown'],
+                },
+                gapClassification: {
+                  type: 'string',
+                  enum: ['true_gap', 'profile_missing', 'parser_missing', 'mapping_gap', 'wording_gap', 'needs_confirmation', 'not_required'],
+                  description: 'Fine-grained gap type. Only set when userCoverageStatus is gap or partial.',
                 },
                 sourceExcerpt: {
                   type: 'string',
@@ -120,6 +125,14 @@ Rules:
 - domainSignals: extract industry, company type, technology domain, and culture signals from the JD text only.
 - sourceExcerpt: for each requirement, quote ≤15 words from the JD that justify it. If no direct quote exists, omit the field.
 - profileEvidence: briefly note which profile element covers/gaps this requirement.
+- gapClassification: for required requirements where userCoverageStatus is 'gap' or 'partial', classify the gap type:
+  - true_gap: user genuinely lacks this — no adjacent evidence exists
+  - profile_missing: user likely has it but their profile text doesn't mention it — good bridge target
+  - parser_missing: the JD signal is weak or ambiguous — this requirement may be over-detected
+  - mapping_gap: user has the skill/experience under a different name or domain framing
+  - wording_gap: user has the substance but is missing the JD-specific vocabulary
+  - needs_confirmation: unclear — a bridge question can resolve whether user has this
+  Omit gapClassification for 'covered' or 'unknown' requirements.
 - IMPORTANT: All requirements must come from the JD text. Do not infer requirements from the company name or general industry knowledge.`,
     messages: [
       {
@@ -141,15 +154,19 @@ Rules:
     }
   }
 
-  // Stamp sourceType on all requirements
-  function stampSource(reqs: JDRequirement[]): JDRequirement[] {
-    return reqs.map(r => ({ ...r, sourceType: jdSourceType }))
+  // Stamp sourceType on all requirements; stamp gapClassification: 'not_required' on nice-to-haves
+  function stampSource(reqs: JDRequirement[], forceGap?: GapClassification): JDRequirement[] {
+    return reqs.map(r => ({
+      ...r,
+      sourceType: jdSourceType,
+      ...(forceGap !== undefined ? { gapClassification: forceGap } : {}),
+    }))
   }
 
   const requirementMap: JDRequirementMap = {
     ...input.requirementMap,
     required: stampSource(input.requirementMap.required),
-    niceToHave: stampSource(input.requirementMap.niceToHave),
+    niceToHave: stampSource(input.requirementMap.niceToHave, 'not_required'),
     needsEvidenceItems: input.requirementMap.needsEvidenceItems ?? [],
     // Back-fill the deprecated field so existing consumers don't break
     unsupportedRequirements: input.requirementMap.needsEvidenceItems ?? [],

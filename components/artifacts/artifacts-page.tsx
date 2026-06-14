@@ -1,22 +1,27 @@
 'use client'
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
-import { getSession } from '@/lib/storage/sessions'
+import { getSession, updateOverallRefinementPrompt } from '@/lib/storage/sessions'
 import { getUserProfile } from '@/lib/storage/user-profile'
 import { getSessionBridgeQuestions } from '@/lib/storage/bridge-questions'
 import {
   saveArtifactSection,
+  saveRefinedArtifactSection,
   getSessionSections,
   acceptSection,
   saveManualEdit
 } from '@/lib/storage/artifacts'
 import { getAppliedCalibrationState } from '@/lib/storage/applied-calibration'
+import { getActiveSnapshot } from '@/lib/profile/profileSnapshotStore'
+import { projectSnapshot } from '@/lib/profile/profileProjectionService'
 import { addLearningSignal, getGenerationContext } from '@/lib/storage/learning-signals'
+import { addArtifactHistory } from '@/lib/storage/artifact-history'
 import { containsRejectedPhrase } from '@/lib/validators/claim-classifier'
 import { isGlobalEvidenceWarning } from '@/lib/evidence-scope'
 import type {
   TargetIntake, ArtifactSection, SectionType,
   CalibrationSummary, AppliedCalibrationState,
-  ArtifactGenerationProvenance, CalibrationStatusAtGeneration
+  ArtifactGenerationProvenance, CalibrationStatusAtGeneration,
+  RefinementLearningSignal, ProfileProjection
 } from '@/contracts'
 import { Spinner } from '@/components/shared/spinner'
 import { ArtifactSectionCard } from './artifact-section-card'
@@ -80,6 +85,15 @@ export function ArtifactsPage({ sessionId }: { sessionId: string }) {
   const [calibrationUpdatedBanner, setCalibrationUpdatedBanner] = useState(false)
   const prevCalibrationRef = useRef<CalibrationSummary | undefined>(undefined)
 
+  // Overall refinement prompt — session-wide direction applied to all Stage 3B refine calls
+  const [overallPrompt, setOverallPrompt] = useState('')
+  const [overallPromptDraft, setOverallPromptDraft] = useState('')
+  const [overallPromptEditing, setOverallPromptEditing] = useState(false)
+
+  // Request-changes state — which section is open for user refinement input
+  const [requestChangesType, setRequestChangesType] = useState<SectionType | null>(null)
+  const [requestChangesDraft, setRequestChangesDraft] = useState('')
+
   // Deduplicated global evidence warnings — shown once at top, filtered from section cards
   const globalWarnings = useMemo(() => {
     const seen = new Set<string>()
@@ -105,6 +119,10 @@ export function ArtifactsPage({ sessionId }: { sessionId: string }) {
         getAppliedCalibrationState(sessionId)
       ])
       setSession(s ?? null)
+      if (s?.overallRefinementPrompt) {
+        setOverallPrompt(s.overallRefinementPrompt)
+        setOverallPromptDraft(s.overallRefinementPrompt)
+      }
       const map = new Map<SectionType, ArtifactSection>()
       for (const sec of existingSections) map.set(sec.type, sec)
       setSections(map)
@@ -148,14 +166,23 @@ export function ArtifactsPage({ sessionId }: { sessionId: string }) {
     if (existing?.status === 'accepted' && !refinementInstruction) return
     if (!session) return
 
-    const [profile, signalCtx] = await Promise.all([
+    const [profile, signalCtx, activeSnapshot] = await Promise.all([
       getUserProfile(),
       getGenerationContext({
         roleCategory: session.emphasisRecommendation,
         sectionType: type
-      })
+      }),
+      getActiveSnapshot()
     ])
     if (!profile) { setError('Profile required.'); return }
+
+    const profileProjection: ProfileProjection | undefined = activeSnapshot
+      ? projectSnapshot(activeSnapshot, {
+          sectionType: type,
+          targetRoleTitle: session.roleTitle,
+          targetDomains: session.companySummary ? [session.companySummary.slice(0, 50)] : [],
+        })
+      : undefined
 
     const allRejected = [...signalCtx.rejectedPhrases, ...profile.rejectedPhrases]
 
@@ -200,7 +227,10 @@ export function ArtifactsPage({ sessionId }: { sessionId: string }) {
           refinementInstruction,
           currentContent: refinementInstruction ? existing?.content : undefined,
           operation,
-          calibrationSummary
+          calibrationSummary,
+          profileProjection,
+          roleTitle: session.roleTitle,
+          company: session.company,
         })
       })
 
@@ -244,6 +274,113 @@ export function ArtifactsPage({ sessionId }: { sessionId: string }) {
     }
   }, [session, sections, sessionId, calibrationSummary])
 
+  // ── Refine (dedicated LLM path — distinct from generate/regenerate) ──────────
+
+  const handleRefineSection = useCallback(async (type: SectionType, instruction: string) => {
+    const existing = sections.get(type)
+    if (!existing) return
+    if (!session) return
+    if (!instruction.trim()) return
+
+    const [profile, signalCtx] = await Promise.all([
+      getUserProfile(),
+      getGenerationContext({ roleCategory: session.emphasisRecommendation, sectionType: type })
+    ])
+    if (!profile) { setError('Profile required.'); return }
+
+    const allRejected = [...signalCtx.rejectedPhrases, ...profile.rejectedPhrases]
+
+    setGeneratingType(type)
+    setError('')
+
+    try {
+      const priorVersions = (existing.versions ?? []).slice(0, 3).map(v => ({
+        versionNumber: v.versionNumber,
+        userInstruction: v.userInstruction,
+        revisedText: v.revisedText,
+      }))
+
+      const res = await fetch('/api/artifact-refine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId,
+          sectionType: type,
+          artifactText: existing.content,
+          userInstruction: instruction,
+          jdMap: session.jdRequirementMap,
+          profile,
+          answeredQuestions: await import('@/lib/storage/bridge-questions').then(m => m.getAnsweredQuestions(sessionId)),
+          emphasis: session.emphasisRecommendation,
+          companySummary: session.companySummary,
+          fitHypothesis: session.fitHypothesis,
+          riskGaps: session.riskGaps,
+          acceptedSignals: signalCtx.personalSignals,
+          globalSignals: signalCtx.globalSignals,
+          rejectedPhrases: allRejected,
+          calibrationSummary,
+          priorVersions,
+          overallRefinementPrompt: overallPrompt || undefined,
+          roleTitle: session.roleTitle,
+          company: session.company,
+        })
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.message ?? data.error ?? 'Refinement failed.')
+        return
+      }
+
+      // Guard: revised text must not be the user's instruction
+      if (data.revisedText?.trim() === instruction.trim()) {
+        setError('Refinement failed: the LLM returned the instruction as the artifact. No change applied.')
+        return
+      }
+
+      // Guard: revised text must differ from the current content
+      if (!data.revisedText?.trim()) {
+        setError('Refinement failed: LLM returned empty text. No change applied.')
+        return
+      }
+
+      const phraseViolation = data.revisedText && containsRejectedPhrase(data.revisedText, allRejected)
+      if (phraseViolation) {
+        setGeneratingType(null)
+        return handleRefineSection(type, `Do not use the phrase: "${phraseViolation}"`)
+      }
+
+      const saved = await saveRefinedArtifactSection(
+        {
+          sessionId,
+          type,
+          content: data.revisedText,
+          bullets: existing.bullets,
+          generationRationale: existing.generationRationale,
+          evidenceWarnings: existing.evidenceWarnings ?? [],
+          sourceMappings: existing.sourceMappings ?? [],
+          signalInfluence: existing.signalInfluence,
+          jdTraceability: existing.jdTraceability ?? [],
+          blockedClaimDiagnostics: existing.blockedClaimDiagnostics ?? [],
+          calibrationInfluence: existing.calibrationInfluence,
+          generationProvenance: existing.generationProvenance,
+          userNote: instruction,
+          status: 'needs_review',
+          refinementChangeSummary: data.changeSummary ?? [],
+          refinementEvidenceBoundary: data.evidenceBoundary,
+          refinementConfidence: data.confidence,
+        },
+        data.version
+      )
+
+      setSections(prev => new Map(prev).set(type, saved))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Refinement failed.')
+    } finally {
+      setGeneratingType(null)
+    }
+  }, [session, sections, sessionId, calibrationSummary, overallPrompt])
+
   // ── Accept ─────────────────────────────────────────────────────────────────
 
   async function handleAccept(section: ArtifactSection) {
@@ -255,17 +392,18 @@ export function ArtifactsPage({ sessionId }: { sessionId: string }) {
     }
     setSections(prev => new Map(prev).set(section.type, updated))
 
-    // Emit accepted-bullet signals only for display-partition bullets (the accepted content)
+    // Store accepted display bullets as artifact history (not learning signals — they are
+    // resume content, not reusable generation rules).
     for (const bullet of section.bullets.filter(b =>
       (b.partition ?? 'display') === 'display' && b.approved !== false
     )) {
-      await addLearningSignal({
-        scope: 'personal',
-        type: 'accepted-bullet',
+      await addArtifactHistory({
+        sessionId: session?.id ?? '',
+        kind: 'accepted-bullet',
         content: bullet.text,
-        context: `${session?.roleTitle} at ${session?.company}`,
+        sectionType: section.type,
         roleCategory: session?.emphasisRecommendation,
-        sectionType: section.type
+        context: `${session?.roleTitle} at ${session?.company}`,
       })
     }
 
@@ -280,6 +418,23 @@ export function ArtifactsPage({ sessionId }: { sessionId: string }) {
         roleCategory: session?.emphasisRecommendation,
         sectionType: section.type
       })
+    }
+
+    // Emit learning signals from the most recent LLM refinement (if this was a refined section)
+    const latestVersion = section.versions?.[0]
+    if (latestVersion?.source === 'llm_refinement' && latestVersion.learningSignals.length > 0) {
+      for (const sig of latestVersion.learningSignals as RefinementLearningSignal[]) {
+        await addLearningSignal({
+          scope: sig.scope === 'global_product' ? 'global' : 'personal',
+          // RefinementLearningSignal.type is a strict subset of LearningSignalType
+          type: sig.type as Parameters<typeof addLearningSignal>[0]['type'],
+          content: sig.signal,
+          globalContent: sig.scope === 'global_product' ? sig.signal : undefined,
+          context: `Refinement of ${section.type} for ${session?.roleTitle} at ${session?.company}`,
+          roleCategory: session?.emphasisRecommendation,
+          sectionType: section.type,
+        })
+      }
     }
   }
 
@@ -314,13 +469,14 @@ export function ArtifactsPage({ sessionId }: { sessionId: string }) {
     if (!approved) {
       const bullet = section.bullets.find(b => b.id === bulletId)
       if (bullet) {
-        await addLearningSignal({
-          scope: 'personal',
-          type: 'rejected-bullet',
+        // Store as artifact history — a rejected bullet is resume content, not a generation rule.
+        await addArtifactHistory({
+          sessionId: session?.id ?? '',
+          kind: 'rejected-bullet',
           content: bullet.text,
-          context: `Rejected bullet in ${section.type}`,
+          sectionType: section.type,
           roleCategory: session?.emphasisRecommendation,
-          sectionType: section.type
+          context: `Rejected bullet in ${section.type}`,
         })
       }
     }
@@ -337,6 +493,17 @@ export function ArtifactsPage({ sessionId }: { sessionId: string }) {
       version: (section.version ?? 0) + 1
     }
     setSections(prev => new Map(prev).set(section.type, updated))
+  }
+
+  // ── Overall refinement prompt ──────────────────────────────────────────────
+
+  async function handleSaveOverallPrompt() {
+    const trimmed = overallPromptDraft.trim()
+    setOverallPrompt(trimmed)
+    setOverallPromptEditing(false)
+    if (sessionId) {
+      await updateOverallRefinementPrompt(sessionId, trimmed)
+    }
   }
 
   // ── Render guards ──────────────────────────────────────────────────────────
@@ -431,6 +598,64 @@ export function ArtifactsPage({ sessionId }: { sessionId: string }) {
         )}
       </div>
 
+      {/* Overall refinement direction — session-wide strategy applied to every refine call */}
+      <div className="border border-gray-700 rounded-lg overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-2.5 bg-gray-800/40 border-b border-gray-700">
+          <div>
+            <span className="text-xs font-medium text-gray-300">Session-wide refinement direction</span>
+            <span className="ml-2 text-xs text-gray-600">· applied to all section refine calls</span>
+          </div>
+          {!overallPromptEditing && (
+            <button
+              onClick={() => { setOverallPromptDraft(overallPrompt); setOverallPromptEditing(true) }}
+              className="text-xs text-gray-500 hover:text-gray-300"
+            >
+              {overallPrompt ? 'Edit' : 'Set direction'}
+            </button>
+          )}
+        </div>
+        <div className="px-4 py-3">
+          {overallPromptEditing ? (
+            <div className="space-y-2">
+              <textarea
+                className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-xs text-gray-200 placeholder-gray-600 resize-none focus:outline-none focus:border-gray-400"
+                rows={3}
+                placeholder="e.g., Focus on BA delivery over generic PO language. Foreground requirements elicitation and stakeholder alignment. Use concise, evidence-grounded phrasing throughout."
+                value={overallPromptDraft}
+                onChange={e => setOverallPromptDraft(e.target.value)}
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSaveOverallPrompt}
+                  className="px-3 py-1 bg-gray-700 text-gray-200 rounded text-xs font-medium hover:bg-gray-600"
+                >
+                  Save direction
+                </button>
+                <button
+                  onClick={() => setOverallPromptEditing(false)}
+                  className="px-3 py-1 border border-gray-700 text-gray-500 rounded text-xs hover:border-gray-500 hover:text-gray-300"
+                >
+                  Cancel
+                </button>
+                {overallPrompt && (
+                  <button
+                    onClick={() => { setOverallPromptDraft(''); setOverallPrompt(''); setOverallPromptEditing(false); updateOverallRefinementPrompt(sessionId, '') }}
+                    className="px-3 py-1 text-xs text-red-500 hover:text-red-400"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : overallPrompt ? (
+            <p className="text-xs text-gray-400 leading-relaxed">{overallPrompt}</p>
+          ) : (
+            <p className="text-xs text-gray-600 italic">No session direction set. All refinements use only section-level instructions and calibration.</p>
+          )}
+        </div>
+      </div>
+
       {/* Stage 2 warning */}
       {(bridgeIncomplete || bridgeNotStarted) && (
         <div className="flex gap-2 px-4 py-3 bg-amber-950/30 border border-amber-800/50 rounded-lg text-xs text-amber-300">
@@ -470,16 +695,20 @@ export function ArtifactsPage({ sessionId }: { sessionId: string }) {
                 <div className="flex items-center gap-2 shrink-0 ml-3">
                   {isAccepted && (
                     <button
-                      onClick={() => generateSection(type, {
-                        refinementInstruction: 'Rewrite this section.',
-                        operation: 'regenerate'
-                      })}
+                      onClick={() => {
+                        setRequestChangesType(prev => prev === type ? null : type)
+                        setRequestChangesDraft('')
+                      }}
                       disabled={isGenerating}
-                      className="text-xs px-3 py-1 border border-gray-600 text-gray-400 rounded hover:border-gray-400 hover:text-gray-200 disabled:opacity-40"
+                      className={`text-xs px-3 py-1 border rounded disabled:opacity-40 ${
+                        requestChangesType === type
+                          ? 'border-blue-500 text-blue-300 bg-blue-950/30'
+                          : 'border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200'
+                      }`}
                     >
                       {isGenerating
-                        ? <span className="flex items-center gap-1"><Spinner className="h-3 w-3 text-gray-400" />Generating…</span>
-                        : 'Request Changes'}
+                        ? <span className="flex items-center gap-1"><Spinner className="h-3 w-3 text-gray-400" />Refining…</span>
+                        : requestChangesType === type ? 'Cancel' : 'Request Changes'}
                     </button>
                   )}
                   {!isAccepted && (
@@ -496,6 +725,44 @@ export function ArtifactsPage({ sessionId }: { sessionId: string }) {
                 </div>
               </div>
 
+              {/* Inline request-changes input — opens when user clicks Request Changes on an accepted section */}
+              {requestChangesType === type && !isGenerating && (
+                <div className="px-5 py-3 bg-blue-950/10 border-b border-blue-900/40 space-y-2">
+                  <p className="text-xs text-blue-400">Describe what should change in this section:</p>
+                  {overallPrompt && (
+                    <p className="text-xs text-gray-600 italic">Session direction already applied: "{overallPrompt.slice(0, 80)}{overallPrompt.length > 80 ? '…' : ''}"</p>
+                  )}
+                  <textarea
+                    className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-gray-200 placeholder-gray-600 resize-none focus:outline-none focus:border-blue-600"
+                    rows={3}
+                    placeholder="e.g., Tighten BA framing, remove QA references, add more credit-union language, reduce bullet count by 30%, preserve metrics."
+                    value={requestChangesDraft}
+                    onChange={e => setRequestChangesDraft(e.target.value)}
+                    autoFocus
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        if (!requestChangesDraft.trim()) return
+                        handleRefineSection(type, requestChangesDraft)
+                        setRequestChangesType(null)
+                        setRequestChangesDraft('')
+                      }}
+                      disabled={!requestChangesDraft.trim()}
+                      className="px-3 py-1 bg-blue-700 text-white rounded text-xs font-medium hover:bg-blue-600 disabled:opacity-40"
+                    >
+                      Submit Refinement
+                    </button>
+                    <button
+                      onClick={() => { setRequestChangesType(null); setRequestChangesDraft('') }}
+                      className="px-3 py-1 border border-gray-700 text-gray-500 rounded text-xs hover:border-gray-500 hover:text-gray-300"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Card body */}
               {section ? (
                 <ArtifactSectionCard
@@ -505,7 +772,7 @@ export function ArtifactsPage({ sessionId }: { sessionId: string }) {
                   currentCalibrationStateId={appliedCalibrationState?.id}
                   onAccept={() => handleAccept(section)}
                   onReject={reason => handleReject(section, reason)}
-                  onRefine={instruction => generateSection(type, { refinementInstruction: instruction, operation: 'refine' })}
+                  onRefine={instruction => handleRefineSection(type, instruction)}
                   onBulletApproval={(bulletId, approved) => handleBulletApproval(section, bulletId, approved)}
                   onManualSave={(content, note) => handleManualSave(section, content, note)}
                 />

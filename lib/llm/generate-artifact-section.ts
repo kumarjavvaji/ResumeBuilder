@@ -10,7 +10,8 @@ import type {
   EmphasisCategory,
   BlockedClaimDiagnostic,
   CalibrationSummary,
-  CalibrationInfluence
+  CalibrationInfluence,
+  ProfileProjection
 } from '@/contracts'
 import { nanoid } from '@/lib/storage/nanoid'
 import {
@@ -25,6 +26,12 @@ import {
   sanitizeCalibrationEvidenceRefs,
   sanitizeSourceMappings
 } from '@/lib/calibration/influence'
+import {
+  buildArtifactGenerationBrief,
+  serializeBriefForPrompt,
+} from './artifact-generation-brief'
+import { buildQualifiedEvidenceCards } from './qualified-evidence-cards'
+import { runClaimFidelityCheck } from './claim-fidelity-check'
 
 export interface GenerateOptions {
   sessionId: string
@@ -50,6 +57,12 @@ export interface GenerateOptions {
   operation?: 'generate' | 'refine' | 'regenerate'
   // Stage 3A calibration: market patterns only — not user evidence
   calibrationSummary?: CalibrationSummary
+  // Stage 1 layered profile: focused evidence slice from ProfileSnapshot (optional)
+  profileProjection?: ProfileProjection
+  /** Target role title — used to build the evaluator lens in the Artifact Generation Brief. */
+  roleTitle?: string
+  /** Target company name — included in the brief for contextual framing. */
+  company?: string
 }
 
 export interface GeneratedSection {
@@ -70,10 +83,22 @@ export async function generateArtifactSection(opts: GenerateOptions): Promise<Ge
     emphasis, companySummary, fitHypothesis, riskGaps,
     acceptedSignals, globalSignals = [], rejectedPhrases,
     refinementInstruction, currentContent, operation = 'generate',
-    calibrationSummary
+    calibrationSummary, profileProjection,
+    roleTitle = '', company = '',
   } = opts
 
   const bundle = buildScopedEvidenceBundle(profile, answeredQuestions, sectionType)
+
+  const evidenceCards = buildQualifiedEvidenceCards(profile, answeredQuestions, jdMap, bundle)
+
+  const brief = buildArtifactGenerationBrief({
+    sectionType, emphasis, roleTitle, company, jdMap, bundle,
+    acceptedSignals, globalSignals, rejectedPhrases,
+    constraints: profile.constraints ?? [],
+    calibrationSummary, companySummary,
+    qualifiedEvidenceCards: evidenceCards,
+  })
+
   const toolSchema = buildToolSchema(sectionType)
   const systemPrompt = buildSystemPrompt(
     sectionType, emphasis, rejectedPhrases, acceptedSignals, globalSignals,
@@ -81,12 +106,14 @@ export async function generateArtifactSection(opts: GenerateOptions): Promise<Ge
     bundle.scope.framingNote,
     bundle.scope.disallowedClaimPatterns,
     bundle.scope.requiredFramingRules,
-    calibrationSummary
+    calibrationSummary,
+    brief,
   )
   const userContent = buildUserContent({
     sectionType, jdMap, profile,
     bundle,
     companySummary, fitHypothesis, riskGaps,
+    profileProjection,
     refinementInstruction, currentContent, operation
   })
 
@@ -157,13 +184,28 @@ export async function generateArtifactSection(opts: GenerateOptions): Promise<Ge
     ? displayBullets.map(b => `• ${b.text}`).join('\n')
     : raw.content ?? ''
 
+  // Post-generation claim fidelity check against evidence cards — deterministic, no LLM call
+  const fidelityResult = runClaimFidelityCheck(finalBullets, evidenceCards)
+  if (!fidelityResult.passed) {
+    for (const violation of fidelityResult.violations) {
+      const bullet = finalBullets[violation.bulletIndex]
+      if (bullet && bullet.partition === 'display') {
+        bullet.partition = 'needs-confirmation'
+        bullet.partitionReason = violation.explanation
+      }
+    }
+  }
+
   // Build section-specific warnings — exclude global domain-gap warnings (shown at session level)
   const rawWarnings = raw.evidenceWarnings ?? []
   const sectionSpecificWarnings = rawWarnings.filter(w => !isGlobalEvidenceWarning(w))
   const partitionWarnings = validationResults
     .filter(r => r.partition !== 'display')
     .map(r => `Claim partitioned to "${r.partition}": ${r.partitionReason}`)
-  const evidenceWarnings = [...sectionSpecificWarnings, ...partitionWarnings]
+  const fidelityWarnings = fidelityResult.violations.map(
+    v => `Evidence guardrail [${v.violationType}]: ${v.explanation}`
+  )
+  const evidenceWarnings = [...sectionSpecificWarnings, ...partitionWarnings, ...fidelityWarnings]
   const calibrationInfluence = normalizeCalibrationInfluence(raw.calibrationInfluence, {
     calibrationAvailable: calibrationSummary !== undefined,
     sectionType
@@ -194,7 +236,8 @@ function buildSystemPrompt(
   framingNote: string | null,
   disallowedClaimPatterns: string[],
   requiredFramingRules: string[],
-  calibrationSummary?: CalibrationSummary
+  calibrationSummary?: CalibrationSummary,
+  brief?: import('./artifact-generation-brief').ArtifactGenerationBrief
 ): string {
   const rejectedBlock = rejectedPhrases.length
     ? `\nNEVER use these phrases (user-rejected): ${rejectedPhrases.map(p => `"${p}"`).join(', ')}`
@@ -241,7 +284,9 @@ function buildSystemPrompt(
     ? buildCalibrationBlock(calibrationSummary)
     : ''
 
-  return `You generate targeted resume artifacts for a specific job application.
+  const briefBlock = brief ? serializeBriefForPrompt(brief) : ''
+
+  return `${briefBlock}You generate targeted resume artifacts for a specific job application.
 
 Emphasis: ${emphasis}
 Section type: ${type}
@@ -320,13 +365,15 @@ interface BuildContentOpts {
   refinementInstruction?: string
   currentContent?: string
   operation: 'generate' | 'refine' | 'regenerate'
+  profileProjection?: ProfileProjection
 }
 
 function buildUserContent(opts: BuildContentOpts): string {
   const {
     sectionType, jdMap, profile, bundle,
     companySummary, fitHypothesis, riskGaps,
-    refinementInstruction, currentContent, operation
+    refinementInstruction, currentContent, operation,
+    profileProjection
   } = opts
 
   const lines: string[] = [`Generate section: ${sectionType}  [operation: ${operation}]`, '']
@@ -407,6 +454,31 @@ function buildUserContent(opts: BuildContentOpts): string {
       lines.push(`  [User expressed uncertainty] ${n.normalizedEvidenceStatement}`)
     }
     lines.push('')
+  }
+
+  // ── Profile snapshot evidence (layered profile, if available) ──────────────
+  if (profileProjection) {
+    if (profileProjection.relevantClaims.length > 0) {
+      lines.push('Additional verified claims from profile snapshot (strong evidence only):')
+      for (const c of profileProjection.relevantClaims.filter(c => c.evidenceStrength !== 'weak')) {
+        lines.push(`  [${c.category}] ${c.text}`)
+      }
+      lines.push('')
+    }
+    if (profileProjection.relevantMetrics.length > 0) {
+      lines.push('Verified metrics from profile snapshot:')
+      for (const m of profileProjection.relevantMetrics) {
+        lines.push(`  ${m.text}${m.context ? ` (${m.context})` : ''}`)
+      }
+      lines.push('')
+    }
+    if (profileProjection.refinementDirections.length > 0) {
+      lines.push('User refinement preferences (from prior accepted refinements):')
+      for (const d of profileProjection.refinementDirections) {
+        lines.push(`  ${d.text}`)
+      }
+      lines.push('')
+    }
   }
 
   // ── Refine context ─────────────────────────────────────────────────────────
