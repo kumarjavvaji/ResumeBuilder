@@ -13,6 +13,7 @@ import { anthropic, MODEL } from './client'
 import type {
   JDRequirementMap,
   ResumeGenerationContract,
+  ResumeStrategyBrief,
   UserProfile,
   BridgeQuestion,
   LearningSignal,
@@ -21,6 +22,7 @@ import type {
 } from '@/contracts'
 import { buildFullResumeQualityGate } from './generation-quality-gate'
 import { serializeContractForPrompt } from '@/lib/stage4/resume-generation-contract'
+import { serializeResumeStrategyBriefForPrompt } from '@/lib/resume-strategy/resume-strategy-brief'
 
 export interface FullResumeRefineOptions {
   fullResumeText: string
@@ -39,6 +41,7 @@ export interface FullResumeRefineOptions {
   roleTitle?: string
   company?: string
   contract?: ResumeGenerationContract
+  strategyBrief?: ResumeStrategyBrief
 }
 
 export interface FullResumeRefineResult {
@@ -56,6 +59,7 @@ export async function refineFullResumeExport(opts: FullResumeRefineOptions): Pro
     calibrationSummary,
     roleTitle = '', company = '',
     contract,
+    strategyBrief,
   } = opts
 
   const systemPrompt = buildFullRefineSystemPrompt({
@@ -64,6 +68,7 @@ export async function refineFullResumeExport(opts: FullResumeRefineOptions): Pro
     constraints: profile.constraints ?? [],
     calibrationSummary,
     contract,
+    strategyBrief,
   })
 
   const userContent = buildFullRefineUserContent({
@@ -115,10 +120,11 @@ interface SystemOpts {
   constraints: string[]
   calibrationSummary?: CalibrationSummary
   contract?: ResumeGenerationContract
+  strategyBrief?: ResumeStrategyBrief
 }
 
 function buildFullRefineSystemPrompt(opts: SystemOpts): string {
-  const { emphasis, roleTitle, company, rejectedPhrases, acceptedSignals, globalSignals, constraints, calibrationSummary, contract } = opts
+  const { emphasis, roleTitle, company, rejectedPhrases, acceptedSignals, globalSignals, constraints, calibrationSummary, contract, strategyBrief } = opts
 
   const targetLine = [roleTitle, company].filter(Boolean).join(' at ')
 
@@ -151,6 +157,7 @@ function buildFullRefineSystemPrompt(opts: SystemOpts): string {
 
   const qualityGate = buildFullResumeQualityGate()
   const contractBlock = contract ? serializeContractForPrompt(contract) : ''
+  const strategyBriefBlock = serializeResumeStrategyBriefForPrompt(strategyBrief)
 
   return `You revise a complete resume for a specific job application.
 
@@ -186,6 +193,7 @@ ${constraintsBlock}
 ${personalBlock}
 ${globalBlock}
 ${calibBlock}
+${strategyBriefBlock}
 
 Response format: return only the JSON tool call. No prose before or after.
 ${contractBlock}

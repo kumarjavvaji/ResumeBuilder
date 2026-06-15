@@ -2,6 +2,7 @@ import type {
   ArtifactSection,
   ResumeGenerationContract,
   ResumeReadinessContract,
+  ResumeStrategyBrief,
   SectionType,
   Stage4ExperienceBlock,
   Stage4RawResumeSections,
@@ -65,6 +66,7 @@ export interface BuildStage4RawResumeTextOptions {
   structureSource?: Stage4StructureSource
   contract?: ResumeGenerationContract
   readinessContract?: ResumeReadinessContract
+  strategyBrief?: ResumeStrategyBrief
 }
 
 export function getStage4Readiness(sections: ArtifactSection[]): Stage4Readiness {
@@ -129,6 +131,7 @@ export function buildStage4RawResumeText(opts: BuildStage4RawResumeTextOptions):
     staleReasons: [],
     contract: opts.contract,
     readinessContract: opts.readinessContract,
+    strategyBrief: opts.strategyBrief,
   }
 }
 

@@ -9,6 +9,7 @@ import type {
   LearningSignal,
   ResumeGenerationContract,
   ResumeReadinessContract,
+  ResumeStrategyBrief,
   Stage4RawResumeText,
   TargetIntake,
   UserProfile,
@@ -45,6 +46,7 @@ import {
   validateStage4ResumeOutput,
 } from '@/lib/stage4/resume-generation-contract'
 import { buildResumeReadinessContract } from '@/lib/stage3/readiness-contract'
+import { buildResumeStrategyBrief } from '@/lib/resume-strategy/resume-strategy-brief'
 import { Spinner } from '@/components/shared/spinner'
 import { inputCls, textareaCls } from '@/lib/input-cls'
 
@@ -232,6 +234,15 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
     })
   }, [refineCtx, profile])
 
+  const strategyBrief = useMemo<ResumeStrategyBrief | undefined>(() => {
+    if (!refineCtx || !contract) return undefined
+    return buildResumeStrategyBrief({
+      jdMap: refineCtx.session.jdRequirementMap,
+      blueprint: contract,
+      targetRole: refineCtx.session.roleTitle,
+    })
+  }, [contract, refineCtx])
+
   function validateStage4Text(text: string): ContractValidationResult | undefined {
     if (!contract || !profile) return undefined
     const knownTools = [...profile.skills, ...profile.skillGroups.flatMap(g => g.skills)]
@@ -265,6 +276,7 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
         allowDraft,
         contract,
         readinessContract,
+        strategyBrief,
       })
       const saved = await saveStage4RawResumeText(assembled)
       setRawText(saved)
@@ -303,6 +315,7 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
           jdMap: refineCtx.session.jdRequirementMap,
           bridgeAnswers: refineCtx.bridgeQuestions,
           readinessContract,
+          strategyBrief,
         }),
       })
       if (!res.ok) {
@@ -399,6 +412,7 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
         roleTitle: refineCtx.session.roleTitle,
         company: refineCtx.session.company,
         contract,
+        strategyBrief,
       }),
     })
     if (!res.ok) {
@@ -450,6 +464,7 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
         roleTitle: refineCtx.session.roleTitle,
         company: refineCtx.session.company,
         contract,
+        strategyBrief,
       }),
     })
     if (!res.ok) {

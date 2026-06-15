@@ -3,6 +3,7 @@ import { refineResumeArtifact } from '@/lib/llm/refine-artifact-section'
 import { refineFullResumeExport } from '@/lib/llm/refine-stage4-resume'
 import type {
   ResumeGenerationContract,
+  ResumeStrategyBrief,
   SectionType, JDRequirementMap, UserProfile, BridgeQuestion,
   LearningSignal, EmphasisCategory, CalibrationSummary,
 } from '@/contracts'
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest) {
       roleTitle?: string
       company?: string
       contract?: ResumeGenerationContract
+      strategyBrief?: ResumeStrategyBrief
     }
 
     if (!body.userInstruction?.trim()) {
@@ -63,6 +65,7 @@ export async function POST(req: NextRequest) {
       calibrationSummary: body.calibrationSummary,
       roleTitle: body.roleTitle,
       company: body.company,
+      strategyBrief: body.strategyBrief,
     }
 
     if (body.mode === 'full') {

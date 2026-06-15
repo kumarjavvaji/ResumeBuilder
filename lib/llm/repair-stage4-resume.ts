@@ -17,10 +17,12 @@ import type {
   ContractViolation,
   JDRequirementMap,
   ResumeGenerationContract,
+  ResumeStrategyBrief,
   UserProfile,
   BridgeQuestion,
 } from '@/contracts'
 import { serializeContractForPrompt } from '@/lib/stage4/resume-generation-contract'
+import { serializeResumeStrategyBriefForPrompt } from '@/lib/resume-strategy/resume-strategy-brief'
 
 export interface Stage4RepairOptions {
   resumeText: string
@@ -29,6 +31,7 @@ export interface Stage4RepairOptions {
   profile: UserProfile
   jdMap: JDRequirementMap
   bridgeAnswers?: BridgeQuestion[]
+  strategyBrief?: ResumeStrategyBrief
 }
 
 export interface Stage4RepairResult {
@@ -38,7 +41,7 @@ export interface Stage4RepairResult {
 }
 
 export async function repairStage4Resume(opts: Stage4RepairOptions): Promise<Stage4RepairResult> {
-  const { resumeText, violations, contract, profile, jdMap, bridgeAnswers = [] } = opts
+  const { resumeText, violations, contract, profile, jdMap, bridgeAnswers = [], strategyBrief } = opts
 
   // Only pass semantic violations to the LLM — deterministic ones should have been handled already
   const semanticViolations = violations.filter(
@@ -48,7 +51,7 @@ export async function repairStage4Resume(opts: Stage4RepairOptions): Promise<Sta
     return { repairedText: resumeText, repairsApplied: [], unfixedViolations: [] }
   }
 
-  const systemPrompt = buildRepairSystemPrompt(contract, semanticViolations)
+  const systemPrompt = buildRepairSystemPrompt(contract, semanticViolations, strategyBrief)
   const userContent = buildRepairUserContent(resumeText, semanticViolations, profile, jdMap, bridgeAnswers)
 
   const response = await anthropic.messages.create({
@@ -87,12 +90,14 @@ export async function repairStage4Resume(opts: Stage4RepairOptions): Promise<Sta
 function buildRepairSystemPrompt(
   contract: ResumeGenerationContract,
   violations: ContractViolation[],
+  strategyBrief?: ResumeStrategyBrief,
 ): string {
   const violationBlock = violations
     .map((v, i) => `  ${i + 1}. [${v.rule}] ${v.section}: ${v.detail}`)
     .join('\n')
 
   const contractBlock = serializeContractForPrompt(contract)
+  const strategyBriefBlock = serializeResumeStrategyBriefForPrompt(strategyBrief)
 
   return `You are a resume repair engine. Your ONLY job is to fix the specific violations listed below.
 
@@ -113,6 +118,7 @@ REPAIR RULES (strictly enforced):
 
 VIOLATIONS TO FIX:
 ${violationBlock}
+${strategyBriefBlock}
 ${contractBlock}`
 }
 

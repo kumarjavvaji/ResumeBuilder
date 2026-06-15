@@ -672,6 +672,8 @@ export interface Stage4RawResumeText {
   contract?: ResumeGenerationContract
   /** Pre-generation readiness contract produced by Stage 3 validation gate. */
   readinessContract?: ResumeReadinessContract
+  /** Compact ruleset + Blueprint strategy brief used by Stage 4 generation/review. */
+  strategyBrief?: ResumeStrategyBrief
 }
 
 // ─────────────────────────────────────────────
@@ -729,6 +731,139 @@ export interface ContractValidationResult {
   pass: boolean
   violations: ContractViolation[]
   suggestedRepairs: string[]
+}
+
+// Resume strategy ruleset and compact session brief
+
+export interface ResumeWritingRuleset {
+  sectionPurposeGuidance: {
+    summary: string
+    skills: string
+    experience: string
+    education: string
+  }
+  bulletConstructionRules: string[]
+  metricUseRules: string[]
+  jdAlignmentRules: string[]
+  productOwnerAgileScrumProofRules: string[]
+  executivePresenceRules: string[]
+  antiPatternsToAvoid: string[]
+  rewritePreferences: string[]
+}
+
+export interface ResumeStrategyBrief {
+  targetRoleStrategy: string
+  sectionPurpose: {
+    summary: string
+    skills: string
+    experience: string
+    education: string
+  }
+  jdCriticalThemes: Array<{
+    theme: string
+    mustAppearIn: string[]
+    evidenceRequired: boolean
+  }>
+  bulletConstructionRules: string[]
+  metricUseRules: string[]
+  executivePresenceRules: string[]
+  antiPatternsToAvoid: string[]
+  rewritePreferences: string[]
+}
+
+// ─────────────────────────────────────────────
+// Critical Resume Review (Stage 4 editorial gate)
+// ─────────────────────────────────────────────
+
+export type CriticalResumeArtifactStatus =
+  | 'ready'
+  | 'needs_targeted_rewrite'
+  | 'needs_regeneration'
+  | 'blocked_by_missing_evidence'
+
+export type CriticalResumeSectionPurpose =
+  | 'positioning'
+  | 'ats_support'
+  | 'proof'
+  | 'credentials'
+
+export type CriticalResumeIssueType =
+  | 'summary_recap_instead_of_positioning'
+  | 'summary_duplicates_proof'
+  | 'skills_overloaded'
+  | 'skills_carry_fit_without_experience_proof'
+  | 'jd_theme_missing_from_proof'
+  | 'volume_led_bullet'
+  | 'task_led_bullet'
+  | 'process_led_bullet'
+  | 'hollow_bullet'
+  | 'weak_metric_framing'
+  | 'impact_gap'
+  | 'judgment_gap'
+  | 'authority_boundary_violation'
+  | 'overclaiming'
+  | 'underclaiming'
+  | 'evidence_misrouting'
+  | 'unsupported_claim'
+  | 'unsupported_tool'
+  | 'weak_executive_presence'
+  | 'poor_section_ordering'
+  | 'credential_incomplete'
+
+export interface SectionFinding {
+  sectionKey: string
+  sectionPurpose: CriticalResumeSectionPurpose
+  status: CriticalResumeArtifactStatus
+  findings: Array<{
+    issueType: CriticalResumeIssueType
+    severity: 'must_fix' | 'should_fix' | 'note'
+    excerpt: string
+    whyItFails: string
+    desiredStrategy: string
+    rewriteHint: string
+    allowedEvidenceIds: string[]
+  }>
+}
+
+export interface RewriteDirective {
+  directiveId: string
+  targetSection: string
+  targetScope: 'section' | 'bullet' | 'phrase' | 'ordering'
+  action:
+    | 'rewrite'
+    | 'replace'
+    | 'remove'
+    | 'reorder'
+    | 'expand'
+    | 'compress'
+    | 'move'
+    | 'convert_volume_to_impact'
+    | 'convert_task_to_judgment'
+    | 'add_jd_proof'
+    | 'clarify_authority_boundary'
+    | 'complete_credential'
+  sourceIssueType: string
+  instruction: string
+  allowedEvidenceIds: string[]
+  mustPreserve: string[]
+  mustAvoid: string[]
+  successCriteria: string[]
+}
+
+export interface CriticalResumeReview {
+  artifactStatus: CriticalResumeArtifactStatus
+  reviewSummary: {
+    decision: string
+    primaryReason: string
+    noRewriteNeededReason?: string
+  }
+  sectionFindings: SectionFinding[]
+  rewriteDirectives: RewriteDirective[]
+  blockedQuestions: Array<{
+    missingEvidence: string
+    whyNeeded: string
+    sectionAffected: string
+  }>
 }
 
 // ─────────────────────────────────────────────
