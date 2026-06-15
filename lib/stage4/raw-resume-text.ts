@@ -1,5 +1,7 @@
 import type {
   ArtifactSection,
+  ResumeGenerationContract,
+  ResumeReadinessContract,
   SectionType,
   Stage4ExperienceBlock,
   Stage4RawResumeSections,
@@ -9,6 +11,7 @@ import type {
   UserProfile,
   WorkEntry
 } from '@/contracts'
+import { applyDeterministicRepairs } from './resume-generation-contract'
 
 export const REQUIRED_RESUME_SECTION_TYPES: SectionType[] = [
   'summary',
@@ -60,6 +63,8 @@ export interface BuildStage4RawResumeTextOptions {
   profile: UserProfile
   allowDraft?: boolean
   structureSource?: Stage4StructureSource
+  contract?: ResumeGenerationContract
+  readinessContract?: ResumeReadinessContract
 }
 
 export function getStage4Readiness(sections: ArtifactSection[]): Stage4Readiness {
@@ -97,8 +102,21 @@ export function buildStage4RawResumeText(opts: BuildStage4RawResumeTextOptions):
   const skills = naturalizeSkills(byType.get('skills')?.content ?? '')
   const experiences = buildExperienceBlocks(byType, opts.profile)
   const education = buildEducationText(opts.profile)
-  const sections = assembleSections({ summary, skills, experiences, education })
+  let assembled = assembleSections({ summary, skills, experiences, education })
   const sourceArtifacts = eligible.filter(s => REQUIRED_RESUME_SECTION_TYPES.includes(s.type))
+
+  // Apply deterministic repairs if a contract was provided
+  if (opts.contract) {
+    const { repairedText, repairsApplied } = applyDeterministicRepairs(
+      assembled.fullText,
+      opts.contract,
+      'fullText'
+    )
+    if (repairsApplied.length > 0) {
+      assembled = { ...assembled, fullText: repairedText }
+      warnings.push(...repairsApplied.map(r => `[auto-repair] ${r}`))
+    }
+  }
 
   return {
     sessionId: opts.sessionId,
@@ -106,9 +124,11 @@ export function buildStage4RawResumeText(opts: BuildStage4RawResumeTextOptions):
     sourceArtifactSectionIds: sourceArtifacts.map(s => s.id),
     sourceArtifactSnapshots: sourceArtifacts.map(snapshotSourceArtifact),
     structureSource: opts.structureSource ?? inferStructureSource(opts.profile),
-    sections,
+    sections: assembled,
     warnings,
-    staleReasons: []
+    staleReasons: [],
+    contract: opts.contract,
+    readinessContract: opts.readinessContract,
   }
 }
 

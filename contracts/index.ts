@@ -606,6 +606,15 @@ export type Stage4RawResumeStatus =
   | 'accepted'
   | 'stale'
 
+/** A single section's Stage 4 refinement state — instruction, LLM output, acceptance. */
+export interface Stage4SectionRefinement {
+  instruction: string
+  /** The LLM-revised section text. Not yet in use until accepted. */
+  output: string
+  accepted: boolean
+  generatedAt: string
+}
+
 export type Stage4StructureSource = 'uploaded_resume' | 'manual_profile' | 'default'
 
 export interface Stage4SourceArtifactSnapshot {
@@ -646,6 +655,184 @@ export interface Stage4RawResumeText {
   sections: Stage4RawResumeSections
   warnings: string[]
   staleReasons: string[]
+  /** Full-resume LLM refinement — single instruction applied to the entire resume. */
+  refinementInstruction?: string
+  /** LLM output for the full-resume refinement (pending or accepted). */
+  refinementOutput?: string
+  /** True after the user accepts the full-resume refinement. */
+  refinementAccepted?: boolean
+  /** When the full-resume refinement was produced. */
+  refinementRefinedAt?: string
+  /**
+   * Per-section LLM refinements. Keys are section identifiers:
+   * 'summary' | 'skills' | 'experience-po' | 'experience-ba' | 'experience-qa' | 'education'
+   */
+  sectionRefinements?: Record<string, Stage4SectionRefinement>
+  /** Deterministic generation contract derived from session + profile at assembly time. */
+  contract?: ResumeGenerationContract
+  /** Pre-generation readiness contract produced by Stage 3 validation gate. */
+  readinessContract?: ResumeReadinessContract
+}
+
+// ─────────────────────────────────────────────
+// Resume Generation Contract — deterministic assembly rules
+// ─────────────────────────────────────────────
+
+export type Stage4RoleFamily =
+  | 'product_owner'
+  | 'associate_pm'
+  | 'product_analyst'
+  | 'business_analyst'
+  | 'qa'
+  | 'other'
+
+export interface Stage4SectionPlan {
+  summary: { maxLines: number }
+  skills: { maxRows: number }
+  productOwner: { minBullets: number; maxBullets: number }
+  productAnalyst: { minBullets: number; maxBullets: number }
+  qa: { minBullets: number; maxBullets: number }
+  education: { maxLines: number }
+}
+
+export interface Stage4SessionDirection {
+  representPOFrom2021: boolean
+  avoidFormalTitleHedging: boolean
+  targetPosture: string
+  roadmapBoundary: string
+  azureDevOpsAllowed: boolean
+  travelResumeAllowed: boolean
+  salesforcePreferredPhrase: string
+}
+
+export interface ResumeGenerationContract {
+  targetRoleFamily: Stage4RoleFamily
+  targetPosture: string
+  sectionPlan: Stage4SectionPlan
+  sessionDirection: Stage4SessionDirection
+  bannedPhrases: string[]
+  preferredReplacements: Record<string, string>
+  evidenceRouting: Record<string, string[]>
+  requiredBulletThemes: string[]
+}
+
+export interface ContractViolation {
+  rule: string
+  section: string
+  detail: string
+  canAutoRepair: boolean
+  /** 'error' = blocks export / must repair; 'warning' = advisory, user can dismiss */
+  severity: 'error' | 'warning'
+}
+
+export interface ContractValidationResult {
+  pass: boolean
+  violations: ContractViolation[]
+  suggestedRepairs: string[]
+}
+
+// ─────────────────────────────────────────────
+// Evidence Atoms (Stage 1 classifier output)
+// ─────────────────────────────────────────────
+
+export type EvidenceAtomType =
+  | 'title' | 'role' | 'responsibility' | 'metric' | 'tool'
+  | 'certification' | 'education' | 'domain' | 'method' | 'outcome'
+
+export type EvidenceAllowedUse =
+  | 'summary' | 'skills' | 'po_bullet' | 'pa_bullet' | 'qa_bullet'
+  | 'education' | 'cover_letter' | 'screening_only' | 'exclude'
+
+export type EvidenceAtomWarning =
+  | 'unsupported' | 'vague' | 'stale' | 'duplicate' | 'conflicting'
+  | 'too_volume_led' | 'not_resume_worthy'
+
+export type MetricClass = 'impact' | 'volume' | 'process' | 'unclassified'
+
+export interface EvidenceAtom {
+  id: string
+  text: string
+  atomType: EvidenceAtomType
+  sourceSection: 'work_history' | 'education' | 'certification' | 'skill' | 'bridge_answer'
+  sourceEntryId?: string
+  confidence: 'high' | 'medium' | 'low'
+  allowedUses: EvidenceAllowedUse[]
+  isImpactEvidence: boolean
+  isVolumeEvidence: boolean
+  metricClass?: MetricClass
+  isCandidateSpecificFact: boolean
+  warnings: EvidenceAtomWarning[]
+}
+
+// ─────────────────────────────────────────────
+// Resolved Bridge Decisions (Stage 2)
+// ─────────────────────────────────────────────
+
+export type BridgeDispositionType =
+  | 'use_directly'
+  | 'use_after_rewrite'
+  | 'use_as_constraint'
+  | 'screening_only'
+  | 'needs_clarification'
+  | 'do_not_use'
+
+export interface ResolvedBridgeDecision {
+  questionId: string
+  questionText: string
+  userAnswer: string
+  dispositionType: BridgeDispositionType
+  normalizedStatement: string
+  clearsWarnings: string[]
+  constraint?: string
+  screeningNote?: string
+  routeToResume: boolean
+}
+
+// ─────────────────────────────────────────────
+// Resume Readiness Contract (Stage 3 gate)
+// ─────────────────────────────────────────────
+
+export interface MetricPolicy {
+  preferImpactOverVolume: boolean
+  volumeMetricsRequireImpactTie: boolean
+}
+
+export interface SummaryPolicy {
+  noProofLevelDuplication: boolean
+  noTeamSizeIfInExperience: boolean
+  noCadenceIfInExperience: boolean
+  noMetricsIfInExperience: boolean
+  noToolDetailsIfInExperience: boolean
+}
+
+export interface ResumeReadinessSectionPlan {
+  summary: { purpose: 'positioning'; maxSentences: number; maxApproxLines: number }
+  skills: { purpose: 'ats_support'; maxRows: number }
+  primaryExperience: { minBullets: number; maxBullets: number }
+  secondaryExperience: { minBullets: number; maxBullets: number }
+  earlierExperience: { maxBullets: number }
+  education: { maxLines: number }
+}
+
+export interface ResumeReadinessContract {
+  targetRoleFamily: string
+  targetPosture: string
+  sectionPlan: ResumeReadinessSectionPlan
+  evidenceRouting: Record<string, string[]>
+  resolvedDecisions: Record<string, unknown>
+  bannedPhrases: string[]
+  preferredReplacements: Record<string, string>
+  allowedTools: string[]
+  disallowedTools: string[]
+  requiredExperienceThemes: string[]
+  metricPolicy: MetricPolicy
+  summaryPolicy: SummaryPolicy
+}
+
+export interface ReadinessCheckResult {
+  ready: boolean
+  warnings: string[]
+  blockers: string[]
 }
 
 // ─────────────────────────────────────────────

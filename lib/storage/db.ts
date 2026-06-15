@@ -128,14 +128,15 @@ export class ResumeBuilderDB extends Dexie {
     this.version(10).stores({
       artifactHistory: 'id, sessionId, kind, sectionType, createdAt'
     }).upgrade(async tx => {
+      type LegacyLearningSignal = Omit<LearningSignal, 'type'> & { type: string }
       const polluted = await tx.table('learningSignals')
-        .filter((s: LearningSignal & { type: string }) =>
+        .filter((s: LegacyLearningSignal) =>
           s.type === 'accepted-bullet' || s.type === 'rejected-bullet' || s.type === 'approved-metric'
         )
         .toArray()
 
       if (polluted.length > 0) {
-        const historyRecords: ArtifactHistoryRecord[] = polluted.map((s: LearningSignal & { type: string }) => ({
+        const historyRecords: ArtifactHistoryRecord[] = polluted.map((s: LegacyLearningSignal) => ({
           id: `migrated_${s.id}`,
           sessionId: '',
           kind: s.type as ArtifactHistoryRecord['kind'],
