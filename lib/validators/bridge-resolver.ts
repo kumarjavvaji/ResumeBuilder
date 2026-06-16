@@ -61,14 +61,14 @@ function resolveOne(q: BridgeQuestion): ResolvedBridgeDecision {
   let constraint: string | undefined
   let screeningNote: string | undefined
 
-  if (NEGATIVE_PHRASES.some(p => answerLower.includes(p)) || confidence === 'none') {
-    dispositionType = 'do_not_use'
-    routeToResume = false
-  } else if (CONSTRAINT_PHRASES.some(p => answerLower.includes(p))) {
+  if (CONSTRAINT_PHRASES.some(p => answerLower.includes(p))) {
     dispositionType = 'use_as_constraint'
     routeToResume = false
     constraint = `Screening context only: ${answer.slice(0, 120)}`
     screeningNote = answer
+  } else if (NEGATIVE_PHRASES.some(p => answerLower.includes(p)) || confidence === 'none') {
+    dispositionType = 'do_not_use'
+    routeToResume = false
   } else if (confidence === 'low' && REWRITE_PHRASES.some(p => answerLower.includes(p))) {
     dispositionType = 'needs_clarification'
     routeToResume = false

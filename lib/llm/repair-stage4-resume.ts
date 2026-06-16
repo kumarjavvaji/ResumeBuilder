@@ -18,6 +18,7 @@ import type {
   JDRequirementMap,
   ResumeGenerationContract,
   ResumeStrategyBrief,
+  RewriteDirective,
   UserProfile,
   BridgeQuestion,
 } from '@/contracts'
@@ -32,6 +33,12 @@ export interface Stage4RepairOptions {
   jdMap: JDRequirementMap
   bridgeAnswers?: BridgeQuestion[]
   strategyBrief?: ResumeStrategyBrief
+  /**
+   * Rewrite directives from Critical Review. When present, directives are the primary repair
+   * specification — they carry evidence IDs, mustPreserve, mustAvoid, and successCriteria.
+   * Contract violations remain the hard validation context.
+   */
+  rewriteDirectives?: RewriteDirective[]
 }
 
 export interface Stage4RepairResult {
@@ -41,18 +48,18 @@ export interface Stage4RepairResult {
 }
 
 export async function repairStage4Resume(opts: Stage4RepairOptions): Promise<Stage4RepairResult> {
-  const { resumeText, violations, contract, profile, jdMap, bridgeAnswers = [], strategyBrief } = opts
+  const { resumeText, violations, contract, profile, jdMap, bridgeAnswers = [], strategyBrief, rewriteDirectives = [] } = opts
 
   // Only pass semantic violations to the LLM — deterministic ones should have been handled already
   const semanticViolations = violations.filter(
     v => !v.canAutoRepair && v.severity === 'error'
   )
-  if (semanticViolations.length === 0) {
+  if (semanticViolations.length === 0 && rewriteDirectives.length === 0) {
     return { repairedText: resumeText, repairsApplied: [], unfixedViolations: [] }
   }
 
-  const systemPrompt = buildRepairSystemPrompt(contract, semanticViolations, strategyBrief)
-  const userContent = buildRepairUserContent(resumeText, semanticViolations, profile, jdMap, bridgeAnswers)
+  const systemPrompt = buildRepairSystemPrompt(contract, semanticViolations, strategyBrief, rewriteDirectives)
+  const userContent = buildRepairUserContent(resumeText, semanticViolations, profile, jdMap, bridgeAnswers, rewriteDirectives)
 
   const response = await anthropic.messages.create({
     model: MODEL,
@@ -87,10 +94,11 @@ export async function repairStage4Resume(opts: Stage4RepairOptions): Promise<Sta
 
 // ─── System prompt ─────────────────────────────────────────────────────────────
 
-function buildRepairSystemPrompt(
+export function buildRepairSystemPrompt(
   contract: ResumeGenerationContract,
   violations: ContractViolation[],
   strategyBrief?: ResumeStrategyBrief,
+  rewriteDirectives: RewriteDirective[] = [],
 ): string {
   const violationBlock = violations
     .map((v, i) => `  ${i + 1}. [${v.rule}] ${v.section}: ${v.detail}`)
@@ -98,6 +106,22 @@ function buildRepairSystemPrompt(
 
   const contractBlock = serializeContractForPrompt(contract)
   const strategyBriefBlock = serializeResumeStrategyBriefForPrompt(strategyBrief)
+
+  const directiveRules = rewriteDirectives.length > 0
+    ? `
+REWRITE DIRECTIVE RULES (strictly enforced when directives are present):
+  - Treat the REWRITE DIRECTIVES block in the user message as the PRIMARY repair specification.
+  - For each directive: repair only the section/scope named in targetSection and targetScope.
+  - Use ONLY the allowedEvidenceIds listed for each directive — do not draw from other evidence.
+  - Preserve every item in mustPreserve for that directive.
+  - Avoid every item in mustAvoid for that directive.
+  - The rewrite is successful when all successCriteria for that directive are satisfied.
+  - Do not rewrite sections or bullets not targeted by any directive unless required for structural consistency.
+  - Do not invent facts, tools, metrics, certifications, employers, or titles not in ALLOWED EVIDENCE.
+  - TODO(follow-up): evidence should be filtered structurally by allowedEvidenceIds before this call,
+    not only prompt-constrained. For now, use the provided IDs to scope your repairs.
+`
+    : ''
 
   return `You are a resume repair engine. Your ONLY job is to fix the specific violations listed below.
 
@@ -115,7 +139,7 @@ REPAIR RULES (strictly enforced):
   - Preserve all section headers exactly: SUMMARY, SKILLS, EXPERIENCE, EDUCATION (uppercase, own line).
   - Return the complete resume text (all sections), with only the failing sections changed.
   - No markdown, no explanations, no "here is the repaired version."
-
+${directiveRules}
 VIOLATIONS TO FIX:
 ${violationBlock}
 ${strategyBriefBlock}
@@ -124,12 +148,13 @@ ${contractBlock}`
 
 // ─── User content ─────────────────────────────────────────────────────────────
 
-function buildRepairUserContent(
+export function buildRepairUserContent(
   resumeText: string,
   violations: ContractViolation[],
   profile: UserProfile,
   jdMap: JDRequirementMap,
   bridgeAnswers: BridgeQuestion[],
+  rewriteDirectives: RewriteDirective[] = [],
 ): string {
   const lines: string[] = []
 
@@ -140,6 +165,23 @@ function buildRepairUserContent(
   lines.push('VIOLATIONS (repair exactly these, do not over-reach):')
   violations.forEach((v, i) => lines.push(`  ${i + 1}. ${v.rule} in "${v.section}": ${v.detail}`))
   lines.push('')
+
+  if (rewriteDirectives.length > 0) {
+    lines.push('REWRITE DIRECTIVES (primary repair specification — follow each directive precisely):')
+    rewriteDirectives.forEach((d, i) => {
+      lines.push(`  Directive ${i + 1}: ${d.directiveId}`)
+      lines.push(`    targetSection: ${d.targetSection}`)
+      lines.push(`    targetScope: ${d.targetScope}`)
+      lines.push(`    action: ${d.action}`)
+      lines.push(`    instruction: ${d.instruction}`)
+      lines.push(`    allowedEvidenceIds: ${d.allowedEvidenceIds.join(', ') || '(all provided evidence)'}`)
+      lines.push(`    mustPreserve: ${d.mustPreserve.join(', ') || '(none specified)'}`)
+      lines.push(`    mustAvoid: ${d.mustAvoid.join(', ')}`)
+      lines.push(`    successCriteria:`)
+      d.successCriteria.forEach(c => lines.push(`      - ${c}`))
+    })
+    lines.push('')
+  }
 
   lines.push('ALLOWED EVIDENCE (use only these facts):')
   lines.push('Work history:')

@@ -62,7 +62,9 @@ describe('Resume strategy brief coordination', () => {
     const ruleset = buildDefaultResumeWritingRuleset()
     const brief = makeBrief()
 
-    expect(brief.sectionPurpose.summary).toBe(ruleset.sectionPurposeGuidance.summary)
+    expect(brief.sourceBasis.some(source => source.sourceId === 'scrum-alliance-product-owner-resume-guidance')).toBe(true)
+    expect(brief.activeRuleIds).toContain('scrum-po-value-delivery')
+    expect(brief.sectionPurpose.summary).toContain(ruleset.sectionPurposeGuidance.summary)
     expect(brief.metricUseRules).toContain('Volume metrics require an outcome, decision quality, prioritization, backlog quality, or support-reduction tie.')
     expect(brief.antiPatternsToAvoid).toContain('Skills carrying the main fit argument without Experience proof.')
     expect(serializeResumeStrategyBriefForPrompt(brief)).toContain('RESUME STRATEGY BRIEF')
@@ -151,6 +153,62 @@ EXPERIENCE
     expect(directive?.allowedEvidenceIds).toEqual(['E1', 'E2'])
     expect(directive?.successCriteria.length).toBeGreaterThan(0)
   })
+
+  it('includes Scrum Alliance value delivery and ROI orientation for product-adjacent roles', () => {
+    const brief = makeBrief()
+    const combined = strategyText(brief)
+
+    expect(brief.activeRuleIds).toContain('scrum-po-value-delivery')
+    expect(combined).toMatch(/value delivery/i)
+    expect(combined).toMatch(/ROI awareness/i)
+  })
+
+  it('includes Scrum Alliance Summary-as-tailored-hook guidance', () => {
+    const brief = makeBrief()
+
+    expect(brief.activeRuleIds).toContain('scrum-po-summary-tailored-hook')
+    expect(brief.sectionPurpose.summary).toMatch(/short, tailored positioning hook/i)
+    expect(brief.sectionPurpose.summary).toMatch(/target-role fit/i)
+  })
+
+  it('includes Scrum Alliance action and quantified accomplishment bullet guidance', () => {
+    const brief = makeBrief()
+    const bulletRules = brief.bulletConstructionRules.join(' ')
+
+    expect(brief.activeRuleIds).toContain('scrum-po-action-quantified-accomplishments')
+    expect(bulletRules).toMatch(/action-oriented verbs/i)
+    expect(bulletRules).toMatch(/quantified outcomes/i)
+    expect(bulletRules).toMatch(/what changed/i)
+  })
+
+  it('includes Scrum Alliance Product Owner proof themes', () => {
+    const brief = makeBrief()
+    const combined = strategyText(brief)
+
+    expect(brief.activeRuleIds).toContain('scrum-po-proof-themes')
+    expect(combined).toMatch(/backlog management/i)
+    expect(combined).toMatch(/user stories/i)
+    expect(combined).toMatch(/acceptance criteria/i)
+    expect(combined).toMatch(/stakeholder collaboration/i)
+  })
+
+  it('includes Scrum Alliance Skills-as-ATS-support guidance', () => {
+    const brief = makeBrief()
+
+    expect(brief.activeRuleIds).toContain('scrum-po-skills-ats-experience-proof')
+    expect(brief.sectionPurpose.skills).toMatch(/ATS support/i)
+    expect(brief.sectionPurpose.skills).toMatch(/Experience proves the most important themes/i)
+  })
+
+  it('does not select Scrum Alliance Product Owner rules for unrelated role strategy', () => {
+    const unrelated = buildResumeStrategyBrief({
+      jdMap: { ...jdMap, realJobFunction: 'Account Executive' },
+      targetRole: 'Account Executive',
+    })
+
+    expect(unrelated.sourceBasis).toHaveLength(0)
+    expect(unrelated.activeRuleIds).not.toContain('scrum-po-value-delivery')
+  })
 })
 
 function makeReviewInput(bullet: string) {
@@ -191,6 +249,17 @@ function objectKeysDeep(value: unknown): string[] {
   return Object.entries(value).flatMap(([key, child]) => [key, ...objectKeysDeep(child)])
 }
 
+function strategyText(brief: ResumeStrategyBrief): string {
+  return [
+    brief.sectionPurpose.summary,
+    brief.sectionPurpose.skills,
+    ...brief.bulletConstructionRules,
+    ...brief.executivePresenceRules,
+    ...brief.antiPatternsToAvoid,
+    ...brief.rewritePreferences,
+  ].join(' ')
+}
+
 function makeProfile(): UserProfile {
   return {
     id: 'p1',
@@ -209,6 +278,8 @@ function makeProfile(): UserProfile {
         endDate: '2025',
         bullets: [],
         approvedMetrics: [],
+        domain: '',
+        skills: [],
       },
     ],
     education: [],

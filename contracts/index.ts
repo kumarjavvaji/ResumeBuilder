@@ -81,6 +81,77 @@ export interface DomainIQImport {
   cultureSignals: string[]
 }
 
+export type CompanyIndustryPerspective =
+  | 'business_model'
+  | 'operating_priorities'
+  | 'customer_or_user_base'
+  | 'product_or_platform_context'
+  | 'industry_domain_language'
+  | 'stakeholder_landscape'
+  | 'delivery_environment'
+  | 'risk_quality_compliance'
+  | 'data_reporting_analytics'
+  | 'growth_efficiency_or_retention'
+  | 'implementation_or_operations'
+
+export interface CompanyIndustryBasis {
+  targetCompany: string
+  targetRoleTitle: string
+  industry?: string
+  problemSpace: {
+    thesis: string
+    companyProblemHypothesis: string
+    rolePurposeHypothesis: string
+    operatingContext: string[]
+    impliedBusinessPressures: string[]
+    likelyUserOrStakeholderGroups: string[]
+    systemsOrWorkflowContext: string[]
+    confidence: 'high' | 'medium' | 'low'
+    sourceBasis: Array<'jd' | 'user_note' | 'profile_evidence' | 'inference' | 'company_research' | 'industry_research'>
+  }
+  calibrationSummary: string
+  companyPerspectiveNeeds: Array<{
+    perspective: CompanyIndustryPerspective
+    whyItMattersForResume: string
+    resumeImplication: string
+    confidence: 'high' | 'medium' | 'low'
+    sourceBasis: 'jd' | 'user_note' | 'profile_evidence' | 'inference' | 'company_research' | 'industry_research'
+    supportingSignals?: string[]
+  }>
+  resumeCalibrationAngles: Array<{
+    angle: string
+    relevantEvidenceTypes: string[]
+    sectionsAffected: string[]
+    exampleResumeUse: string
+    avoidOverclaiming?: string
+  }>
+  bridgeQuestionRecommendations: Array<{
+    question: string
+    reason: string
+    expectedUse:
+      | 'summary_positioning'
+      | 'skills_keywords'
+      | 'primary_experience_bullet'
+      | 'secondary_experience_bullet'
+      | 'domain_translation'
+      | 'risk_boundary'
+      | 'screening_only'
+    priority: 'must_ask' | 'useful' | 'optional'
+  }>
+  stage3StrategyInputs: {
+    targetPostureHints: string[]
+    proofThemesToPrioritize: string[]
+    domainTermsToUseIfEvidenced: string[]
+    toolsOrMethodsToVerify: string[]
+    risksOrClaimsToAvoid: string[]
+  }
+  evidenceRoutingHints: Array<{
+    evidenceType: string
+    preferredResumeSection: string
+    reason: string
+  }>
+}
+
 export type EmphasisCategory = 'PO' | 'BA' | 'QA' | 'AI' | 'data' | 'operations' | 'blended'
 
 export type StageKey = 'intake' | 'bridge' | 'artifacts' | 'export' | 'signals'
@@ -154,6 +225,61 @@ export interface FitAnalysis {
   /** Requirement texts that should become bridge question targets. */
   recommendedBridgeTargets: string[]
   generatedAt: string
+  /**
+   * Source-cited findings for every claim that may influence Stage 2 bridge questions.
+   * Optional for backward compatibility with sessions analyzed before provenance tracking.
+   */
+  findings?: Stage1Finding[]
+}
+
+// ─────────────────────────────────────────────
+// Stage 1 Finding Provenance — claim-level source citation
+// ─────────────────────────────────────────────
+
+/** Where a single Stage 1 claim/finding originated. Source the claim atom, not the artifact. */
+export type Stage1SourceType =
+  | 'jd_company_description'
+  | 'jd_department_overview'
+  | 'jd_duties'
+  | 'jd_qualifications'
+  | 'profile_evidence'
+  | 'profile_absence'
+  | 'diq_context'
+  | 'quickstart_company_context'
+  | 'calibration_ref'
+  | 'inference'
+
+export type Stage1SourceUsage =
+  | 'role_requirement'
+  | 'candidate_evidence'
+  | 'candidate_gap'
+  | 'context_for_positioning'
+  | 'synthesis_only'
+  | 'inference_boundary'
+
+export interface Stage1SourceTrace {
+  sourceType: Stage1SourceType
+  sourceLabel: string
+  supportingText: string
+  /** True only for the ground-truth source of this claim (JD text, profile evidence, or profile absence). DIQ/QuickStart/inference are never primary. */
+  primary: boolean
+  usage: Stage1SourceUsage
+}
+
+export type Stage1DownstreamPermission =
+  | 'can_support_resume_claim'
+  | 'needs_user_evidence'
+  | 'gap_to_bridge'
+  | 'context_only_do_not_claim'
+  | 'inference_only'
+
+export interface Stage1Finding {
+  id: string
+  topic: string
+  findingText: string
+  coverageStatus?: 'covered' | 'partial' | 'gap' | 'needs_evidence' | 'weakly_supported' | 'context_only'
+  sourceTrace: Stage1SourceTrace[]
+  downstreamPermission: Stage1DownstreamPermission
 }
 
 /** Per-session audit of how completely Stage 1→5 data is populated. */
@@ -674,6 +800,8 @@ export interface Stage4RawResumeText {
   readinessContract?: ResumeReadinessContract
   /** Compact ruleset + Blueprint strategy brief used by Stage 4 generation/review. */
   strategyBrief?: ResumeStrategyBrief
+  /** Quality trace built at assembly time showing which guidance components were active. */
+  qualityTrace?: Stage4QualityTrace
 }
 
 // ─────────────────────────────────────────────
@@ -736,6 +864,26 @@ export interface ContractValidationResult {
 // Resume strategy ruleset and compact session brief
 
 export interface ResumeWritingRuleset {
+  sourceBasis: Array<{
+    sourceId: string
+    sourceName: string
+    ruleIds: string[]
+  }>
+  sourceBackedRules: Array<{
+    id: string
+    sourceId: string
+    category:
+      | 'summaryPurpose'
+      | 'skillsPurpose'
+      | 'bulletConstruction'
+      | 'jdAlignment'
+      | 'productOwnerAgileScrumProof'
+      | 'executivePresence'
+      | 'antiPattern'
+      | 'rewritePreference'
+    text: string
+    appliesToRoleFamilies: string[]
+  }>
   sectionPurposeGuidance: {
     summary: string
     skills: string
@@ -752,6 +900,12 @@ export interface ResumeWritingRuleset {
 }
 
 export interface ResumeStrategyBrief {
+  sourceBasis: Array<{
+    sourceId: string
+    sourceName: string
+    ruleIds: string[]
+  }>
+  activeRuleIds: string[]
   targetRoleStrategy: string
   sectionPurpose: {
     summary: string
@@ -864,6 +1018,80 @@ export interface CriticalResumeReview {
     whyNeeded: string
     sectionAffected: string
   }>
+}
+
+// ─────────────────────────────────────────────
+// Stage 4 Quality Trace
+// ─────────────────────────────────────────────
+
+export interface Stage4RulesetTrace {
+  rulesetLoaded: boolean
+  activeRuleIds: string[]
+  antiPatternIds: string[]
+  rewriteStrategyIds: string[]
+}
+
+export interface Stage4StrategyBriefTrace {
+  built: boolean
+  targetRoleStrategy?: string
+  jdCriticalThemes: string[]
+  bulletConstructionRules: string[]
+  metricUseRules: string[]
+  executivePresenceRules: string[]
+  antiPatternsToAvoid: string[]
+}
+
+export interface Stage4BlueprintTrace {
+  built: boolean
+  sectionKeys: string[]
+  primaryProofSections: string[]
+  secondaryProofSections: string[]
+  supportingSections: string[]
+  bulletIntentCount: number
+  evidenceRoutingCount: number
+}
+
+export interface Stage4GenerationTrace {
+  promptIncludesStrategyBrief: boolean
+  promptIncludesBlueprint: boolean
+  promptIncludesEvidenceMap: boolean
+  promptIncludesUserDirection: boolean
+  promptIncludesBannedPhrases: boolean
+  modelCallCompleted: boolean
+}
+
+export interface Stage4ValidationTrace {
+  ranDeterministicValidation: boolean
+  violationCount: number
+  violationRules: string[]
+}
+
+export interface Stage4ReviewTrace {
+  ranCriticalReview: boolean
+  artifactStatus?: string
+  findingTypes: string[]
+  rewriteDirectiveCount: number
+  /** Full directives from critical review — passed to repair as primary repair specification. */
+  rewriteDirectives?: RewriteDirective[]
+}
+
+export interface Stage4RepairTrace {
+  repairAttempted: boolean
+  deterministicRepairApplied: boolean
+  llmRepairApplied: boolean
+  finalValidationPassed: boolean
+}
+
+export interface Stage4QualityTrace {
+  sessionId: string
+  generatedAt: string
+  rulesetTrace: Stage4RulesetTrace
+  strategyBriefTrace: Stage4StrategyBriefTrace
+  blueprintTrace: Stage4BlueprintTrace
+  generationTrace: Stage4GenerationTrace
+  validationTrace: Stage4ValidationTrace
+  reviewTrace: Stage4ReviewTrace
+  repairTrace: Stage4RepairTrace
 }
 
 // ─────────────────────────────────────────────

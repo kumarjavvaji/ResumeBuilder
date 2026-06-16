@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { getSession } from '@/lib/storage/sessions'
 import type { TargetIntake } from '@/contracts'
 import { JDRequirementMapView } from '@/components/intake/jd-requirement-map-view'
+import { Stage1FindingsView } from '@/components/intake/stage1-findings-view'
 
 export function SessionDetail({ sessionId }: { sessionId: string }) {
   const [session, setSession] = useState<TargetIntake | null>(null)
@@ -64,6 +65,8 @@ export function SessionDetail({ sessionId }: { sessionId: string }) {
       </div>
 
       <JDRequirementMapView map={session.jdRequirementMap} />
+
+      <Stage1FindingsView findings={session.fitAnalysis?.findings} />
 
       <div>
         <a

@@ -48,9 +48,6 @@ const VOLUME_SIGNALS: RegExp[] = [
   /\b\d+\+?\s+(?:meetings?|standups?|stakeholders?|customers?|users?|clients?|accounts?|reports?)\b/i,
   /\b(?:analyz(?:ed|ing)|review(?:ed|ing)|processed?|handled?|generated?)\s+\d[\d,.]*\+?\s+(?:\w+\s+){0,2}(?:requests?|tickets?|cases?|records?|stories?|meetings?|stakeholders?|clients?|customers?|defects?|reports?)\b/i,
   /\bmanaged?\s+\d+\s+(?:ticket|request|issue|story|case|item|defect)\b/i,
-  /\bcompleted?\s+\d+\b/i,
-  /\bprocessed?\s+\d+\b/i,
-  /\bhandled?\s+\d+\b/i,
 ]
 
 // Process: cadence / ritual / ceremony metrics, not outcomes.
@@ -112,6 +109,11 @@ export function validateBulletMetrics(
 }
 
 function extractMetricSnippet(text: string): string {
+  const metricPattern = [...VOLUME_SIGNALS, ...PROCESS_SIGNALS, ...IMPACT_SIGNALS]
+    .map(pattern => text.match(pattern))
+    .find(Boolean)
+  if (metricPattern?.[0]) return metricPattern[0].trim()
+
   const m = text.match(/\$?\d[\d,.]*\s*(?:%|k|m|billion|million|\+)?/i)
   return m ? m[0].trim() : ''
 }

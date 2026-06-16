@@ -5,6 +5,7 @@
  * that are specific to any real session.
  */
 
+import { describe, expect, it } from 'vitest'
 import { classifyProfileEvidence } from '@/lib/validators/evidence-atoms'
 import type { JDRequirementMap, UserProfile, WorkEntry } from '@/contracts'
 
@@ -50,6 +51,7 @@ function makeJDMap(overrides: Partial<JDRequirementMap> = {}): JDRequirementMap 
   return {
     required: [],
     niceToHave: [],
+    realJobFunction: 'Product Owner',
     ...overrides,
   }
 }

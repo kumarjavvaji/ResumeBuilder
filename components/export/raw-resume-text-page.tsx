@@ -10,6 +10,7 @@ import type {
   ResumeGenerationContract,
   ResumeReadinessContract,
   ResumeStrategyBrief,
+  Stage4QualityTrace,
   Stage4RawResumeText,
   TargetIntake,
   UserProfile,
@@ -28,6 +29,7 @@ import {
   getStage4RawResumeText,
   saveStage4RawResumeText,
   updateStage4RawResumeText,
+  updateStage4RawResumeTextSections,
   saveStage4FullRefinement,
   acceptStage4FullRefinement,
   rejectStage4FullRefinement,
@@ -40,6 +42,7 @@ import {
   formatExperienceBlock,
   getStage4Readiness,
   getStage4StaleReasons,
+  parseSectionsFromRepairedText,
 } from '@/lib/stage4/raw-resume-text'
 import {
   buildResumeGenerationContract,
@@ -168,6 +171,7 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
   const [error, setError] = useState('')
   const [validation, setValidation] = useState<ContractValidationResult | undefined>(undefined)
   const [repairPreview, setRepairPreview] = useState<RepairPreview | undefined>(undefined)
+  const [showDebugTrace, setShowDebugTrace] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -277,6 +281,7 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
         contract,
         readinessContract,
         strategyBrief,
+        jdMap: refineCtx?.session.jdRequirementMap,
       })
       const saved = await saveStage4RawResumeText(assembled)
       setRawText(saved)
@@ -316,6 +321,7 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
           bridgeAnswers: refineCtx.bridgeQuestions,
           readinessContract,
           strategyBrief,
+          rewriteDirectives: targetRawText?.qualityTrace?.reviewTrace?.rewriteDirectives ?? [],
         }),
       })
       if (!res.ok) {
@@ -341,15 +347,18 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
         return
       }
 
-      // Auto-repair output has already passed validation, so display it immediately.
-      await saveStage4FullRefinement(
-        sessionId,
-        `[auto-repair] ${result.repairsApplied.join('; ')}`,
-        result.repairedText,
-      )
-      await acceptStage4FullRefinement(sessionId)
-      const updated = await getStage4RawResumeText(sessionId)
-      if (updated) setRawText(updated)
+      // Auto-repair output has already passed validation. Store the repaired text
+      // back into sections.* so section cards stay in sync. Never write into
+      // refinementOutput — that field is only for explicit user refinement flows.
+      const currentSections = (rawOverride ?? rawText)?.sections
+      if (currentSections) {
+        const patchedSections = parseSectionsFromRepairedText(result.repairedText, currentSections)
+        const updated = await updateStage4RawResumeTextSections(sessionId, patchedSections)
+        if (updated) setRawText(updated)
+      } else {
+        const updated = await getStage4RawResumeText(sessionId)
+        if (updated) setRawText(updated)
+      }
       setValidation(result.remainingValidation)
       setRepairPreview(undefined)
     } catch (err) {
@@ -367,14 +376,13 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
 
   async function acceptPartialRepair() {
     if (!repairPreview) return
-    await saveStage4FullRefinement(
-      sessionId,
-      `[partial auto-repair] ${repairPreview.repairsApplied.join('; ')}`,
-      repairPreview.repairedText,
-    )
-    await acceptStage4FullRefinement(sessionId)
-    const updated = await getStage4RawResumeText(sessionId)
-    if (updated) setRawText(updated)
+    // Store repaired text into sections.* — never into refinementOutput.
+    const currentSections = rawText?.sections
+    if (currentSections) {
+      const patchedSections = parseSectionsFromRepairedText(repairPreview.repairedText, currentSections)
+      const updated = await updateStage4RawResumeTextSections(sessionId, patchedSections)
+      if (updated) setRawText(updated)
+    }
     setValidation(repairPreview.validation)
     setRepairPreview(undefined)
   }
@@ -558,6 +566,14 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
           copied={copiedKey === 'repair-preview'}
           onCopy={() => copyText('repair-preview', repairPreview.repairedText)}
           onAccept={acceptPartialRepair}
+        />
+      )}
+
+      {process.env.NODE_ENV === 'development' && displayRaw?.qualityTrace && (
+        <QualityTracePanel
+          trace={displayRaw.qualityTrace}
+          open={showDebugTrace}
+          onToggle={() => setShowDebugTrace(v => !v)}
         />
       )}
 
@@ -1272,6 +1288,112 @@ function ValidationPanel({
   )
 }
 
+// ─── Quality Trace Panel (dev-only, collapsed by default) ─────────────────────
+
+function QualityTracePanel({
+  trace,
+  open,
+  onToggle,
+}: {
+  trace: Stage4QualityTrace
+  open: boolean
+  onToggle: () => void
+}) {
+  const { rulesetTrace, strategyBriefTrace, blueprintTrace, generationTrace, validationTrace, reviewTrace, repairTrace } = trace
+
+  function BoolRow({ label, value }: { label: string; value: boolean }) {
+    return (
+      <div className="flex items-center gap-2 text-xs">
+        <span className={value ? 'text-green-400' : 'text-gray-500'}>{value ? '✓' : '✗'}</span>
+        <span className={value ? 'text-gray-200' : 'text-gray-500'}>{label}</span>
+      </div>
+    )
+  }
+
+  function CountRow({ label, count }: { label: string; count: number }) {
+    return (
+      <div className="flex items-center gap-2 text-xs">
+        <span className="text-gray-400 font-mono w-6 text-right">{count}</span>
+        <span className="text-gray-300">{label}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="border border-gray-700/60 rounded-lg overflow-hidden">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center justify-between px-4 py-2 bg-gray-800/40 text-left hover:bg-gray-800/60"
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-mono text-gray-400">[dev]</span>
+          <span className="text-xs text-gray-300 font-medium">Stage 4 Quality Trace</span>
+          {!rulesetTrace.rulesetLoaded && (
+            <span className="text-xs px-1.5 py-0.5 bg-amber-900/50 text-amber-300 rounded">no ruleset</span>
+          )}
+          {reviewTrace.ranCriticalReview && (
+            <span className="text-xs px-1.5 py-0.5 bg-blue-900/50 text-blue-300 rounded">reviewed</span>
+          )}
+        </div>
+        <span className="text-xs text-gray-500">{open ? '▲ hide' : '▼ show'}</span>
+      </button>
+
+      {open && (
+        <div className="px-4 py-3 bg-gray-900/40 space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Ruleset / Brief</p>
+              <BoolRow label="Ruleset loaded" value={rulesetTrace.rulesetLoaded} />
+              <BoolRow label="Strategy brief built" value={strategyBriefTrace.built} />
+              <CountRow label="active rule IDs" count={rulesetTrace.activeRuleIds.length} />
+              <CountRow label="anti-pattern IDs" count={rulesetTrace.antiPatternIds.length} />
+              {strategyBriefTrace.jdCriticalThemes.length > 0 && (
+                <div className="mt-1 text-xs text-gray-500">
+                  themes: {strategyBriefTrace.jdCriticalThemes.join(', ')}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Blueprint / Generation</p>
+              <BoolRow label="Blueprint built" value={blueprintTrace.built} />
+              <BoolRow label="Prompt has strategy brief" value={generationTrace.promptIncludesStrategyBrief} />
+              <BoolRow label="Prompt has blueprint" value={generationTrace.promptIncludesBlueprint} />
+              <BoolRow label="Prompt has banned phrases" value={generationTrace.promptIncludesBannedPhrases} />
+              <CountRow label="bullet intent count" count={blueprintTrace.bulletIntentCount} />
+            </div>
+
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Validation</p>
+              <BoolRow label="Ran deterministic validation" value={validationTrace.ranDeterministicValidation} />
+              <CountRow label="violations" count={validationTrace.violationCount} />
+              {validationTrace.violationRules.length > 0 && (
+                <div className="mt-1 text-xs text-gray-500">
+                  rules: {validationTrace.violationRules.join(', ')}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Review / Repair</p>
+              <BoolRow label="Ran critical review" value={reviewTrace.ranCriticalReview} />
+              {reviewTrace.artifactStatus && (
+                <div className="text-xs text-gray-400">status: {reviewTrace.artifactStatus}</div>
+              )}
+              <CountRow label="rewrite directives" count={reviewTrace.rewriteDirectiveCount} />
+              <BoolRow label="Repair attempted" value={repairTrace.repairAttempted} />
+              <BoolRow label="Deterministic repair applied" value={repairTrace.deterministicRepairApplied} />
+              <BoolRow label="Final validation passed" value={repairTrace.finalValidationPassed} />
+            </div>
+          </div>
+
+          <p className="text-xs text-gray-600 font-mono">{trace.generatedAt}</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Plain text block (no refinement) ────────────────────────────────────────
 
 function TextBlock({
@@ -1303,4 +1425,3 @@ function TextBlock({
     </section>
   )
 }
-

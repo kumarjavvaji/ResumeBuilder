@@ -1,7 +1,84 @@
 import type { ResumeWritingRuleset } from '@/contracts'
 
+const SCRUM_ALLIANCE_SOURCE_ID = 'scrum-alliance-product-owner-resume-guidance'
+
+const PRODUCT_ADJACENT_ROLE_FAMILIES = [
+  'product_owner',
+  'product_analyst',
+  'associate_pm',
+  'business_analyst',
+  'it_product',
+]
+
 export function buildDefaultResumeWritingRuleset(): ResumeWritingRuleset {
+  const scrumAllianceRules: ResumeWritingRuleset['sourceBackedRules'] = [
+    {
+      id: 'scrum-po-value-delivery',
+      sourceId: SCRUM_ALLIANCE_SOURCE_ID,
+      category: 'executivePresence',
+      text: 'Product Owner resume content should emphasize value delivery, ROI awareness, prioritization, product backlog decisions, and quality of delivery.',
+      appliesToRoleFamilies: PRODUCT_ADJACENT_ROLE_FAMILIES,
+    },
+    {
+      id: 'scrum-po-avoid-ceremony-ticket-processing',
+      sourceId: SCRUM_ALLIANCE_SOURCE_ID,
+      category: 'antiPattern',
+      text: 'Avoid presenting Product Owner work as only ceremonies or ticket processing.',
+      appliesToRoleFamilies: PRODUCT_ADJACENT_ROLE_FAMILIES,
+    },
+    {
+      id: 'scrum-po-summary-tailored-hook',
+      sourceId: SCRUM_ALLIANCE_SOURCE_ID,
+      category: 'summaryPurpose',
+      text: 'Summary should be a short, tailored positioning hook that communicates target-role fit and core competencies without career chronology or duplicated work-experience proof.',
+      appliesToRoleFamilies: PRODUCT_ADJACENT_ROLE_FAMILIES,
+    },
+    {
+      id: 'scrum-po-action-quantified-accomplishments',
+      sourceId: SCRUM_ALLIANCE_SOURCE_ID,
+      category: 'bulletConstruction',
+      text: 'Experience bullets should use action-oriented verbs, emphasize accomplishments, prefer quantified outcomes when evidence exists, and show what improved or was delivered, how it was done, and what changed.',
+      appliesToRoleFamilies: PRODUCT_ADJACENT_ROLE_FAMILIES,
+    },
+    {
+      id: 'scrum-po-avoid-responsible-task-only',
+      sourceId: SCRUM_ALLIANCE_SOURCE_ID,
+      category: 'antiPattern',
+      text: 'Avoid "responsible for" phrasing and task-only Product Owner bullets.',
+      appliesToRoleFamilies: PRODUCT_ADJACENT_ROLE_FAMILIES,
+    },
+    {
+      id: 'scrum-po-proof-themes',
+      sourceId: SCRUM_ALLIANCE_SOURCE_ID,
+      category: 'productOwnerAgileScrumProof',
+      text: 'When supported by evidence and relevant to the JD, prove backlog management, user stories, acceptance criteria, stakeholder collaboration, requirements gathering, Scrum/Agile delivery, and data-informed product decisions in Experience bullets.',
+      appliesToRoleFamilies: PRODUCT_ADJACENT_ROLE_FAMILIES,
+    },
+    {
+      id: 'scrum-po-skills-ats-experience-proof',
+      sourceId: SCRUM_ALLIANCE_SOURCE_ID,
+      category: 'skillsPurpose',
+      text: 'Use relevant Product Owner keywords from the JD and calibration artifacts for ATS support, while Experience proves the most important themes.',
+      appliesToRoleFamilies: PRODUCT_ADJACENT_ROLE_FAMILIES,
+    },
+    {
+      id: 'scrum-po-jd-tailoring',
+      sourceId: SCRUM_ALLIANCE_SOURCE_ID,
+      category: 'jdAlignment',
+      text: 'Tailor resume strategy to each JD, emphasize the experience most relevant to the target role, and avoid generic Product Owner language when JD-specific proof is available.',
+      appliesToRoleFamilies: PRODUCT_ADJACENT_ROLE_FAMILIES,
+    },
+  ]
+
   return {
+    sourceBasis: [
+      {
+        sourceId: SCRUM_ALLIANCE_SOURCE_ID,
+        sourceName: 'Scrum Alliance Product Owner resume guidance',
+        ruleIds: scrumAllianceRules.map(rule => rule.id),
+      },
+    ],
+    sourceBackedRules: scrumAllianceRules,
     sectionPurposeGuidance: {
       summary: 'Use a 2-3 sentence positioning hook: target identity, core fit, and one or two differentiators. Do not recap proof-level bullets.',
       skills: 'Use compact ATS support terms. Skills should support matching, while Experience carries proof.',

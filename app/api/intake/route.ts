@@ -3,9 +3,10 @@ import { parseJobDescription } from '@/lib/llm/parse-jd'
 import { parseDomainIQ } from '@/lib/llm/parse-domainiq'
 import { generateIntakeSynthesis, type IntakeSynthesis } from '@/lib/llm/generate-intake'
 import { validateJDContent } from '@/lib/validators/jd-content'
-import type { UserProfile, JDSourceType, JDRequirementMap, FitAnalysis, FitRequirement } from '@/contracts'
+import { deriveStage1Findings } from '@/lib/stage1/source-trace'
+import type { UserProfile, JDSourceType, JDRequirementMap, DomainIQImport, FitAnalysis, FitRequirement } from '@/contracts'
 
-function buildFitAnalysis(jdMap: JDRequirementMap, synthesis: IntakeSynthesis): FitAnalysis {
+function buildFitAnalysis(jdMap: JDRequirementMap, synthesis: IntakeSynthesis, domainIQ?: DomainIQImport): FitAnalysis {
   const requirements: FitRequirement[] = jdMap.required.map((r, i) => ({
     requirementId: `req-${i}`,
     requirementText: r.text,
@@ -39,6 +40,7 @@ function buildFitAnalysis(jdMap: JDRequirementMap, synthesis: IntakeSynthesis): 
     gapSummary,
     recommendedBridgeTargets: jdMap.needsEvidenceItems,
     generatedAt: new Date().toISOString(),
+    findings: deriveStage1Findings(jdMap, domainIQ),
   }
 }
 
@@ -81,7 +83,7 @@ export async function POST(req: NextRequest) {
     ])
 
     const synthesis = await generateIntakeSynthesis(parsed.requirementMap, domainIQ, profile)
-    const fitAnalysis = buildFitAnalysis(parsed.requirementMap, synthesis)
+    const fitAnalysis = buildFitAnalysis(parsed.requirementMap, synthesis, domainIQ)
 
     return NextResponse.json({
       rawJD: parsed.rawJD,

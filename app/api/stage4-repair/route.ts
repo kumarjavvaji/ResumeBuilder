@@ -7,6 +7,7 @@ import type {
   ResumeGenerationContract,
   ResumeReadinessContract,
   ResumeStrategyBrief,
+  RewriteDirective,
   UserProfile,
   BridgeQuestion,
 } from '@/contracts'
@@ -28,6 +29,7 @@ export async function POST(req: NextRequest) {
       profile: UserProfile
       jdMap: JDRequirementMap
       bridgeAnswers?: BridgeQuestion[]
+      rewriteDirectives?: RewriteDirective[]
     }
 
     if (!body.resumeText?.trim()) {
@@ -93,6 +95,7 @@ export async function POST(req: NextRequest) {
       jdMap: body.jdMap,
       bridgeAnswers: body.bridgeAnswers ?? [],
       strategyBrief: body.strategyBrief,
+      rewriteDirectives: body.rewriteDirectives ?? [],
     })
 
     // Step 4: run deterministic repairs on LLM output (LLM may have reintroduced banned phrases)

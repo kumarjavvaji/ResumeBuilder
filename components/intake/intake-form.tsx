@@ -17,6 +17,7 @@ import { deriveStageStatuses, canCompleteStage1 } from '@/contracts'
 import { Spinner } from '@/components/shared/spinner'
 import { inputCls, textareaCls } from '@/lib/input-cls'
 import { JDRequirementMapView } from './jd-requirement-map-view'
+import { Stage1FindingsView } from './stage1-findings-view'
 
 // ─── Stage1Status derivation ──────────────────────────────────────────────────
 
@@ -456,19 +457,75 @@ function tryParseDomainIQJson(raw: string): {
   return null
 }
 
+interface QuickStartDiagnostic {
+  mode: 'llm' | 'llm_normalized' | 'retry' | 'retry_normalized' | 'deterministic_fallback'
+  providerConfigured: boolean
+  apiRouteReached: boolean
+  modelCallAttempted: boolean
+  modelCallSucceeded: boolean
+  parseSucceeded: boolean
+  validationSucceeded: boolean
+  normalizationAttempted?: boolean
+  normalizationSucceeded?: boolean
+  retryAttempted: boolean
+  retrySucceeded: boolean
+  fallbackReason: string
+  validationErrors?: string[]
+  normalizedWarnings?: string[]
+  rejectedAttemptNumber?: number
+  rejectedOutputPreview?: string
+  rejectedBasisPreview?: string
+  normalizedOutputPreview?: string
+  displayedJsonSource?: QuickDisplayedSource
+  providerErrorName?: string
+  providerErrorMessage?: string
+}
+
+type QuickDisplayedSource = 'llm' | 'llm_normalized' | 'retry' | 'retry_normalized' | 'deterministic_fallback'
+
+function formatQuickStartFallbackReason(diagnostic: QuickStartDiagnostic | undefined): string {
+  if (!diagnostic) return 'deterministic fallback used; no diagnostic returned.'
+  if (diagnostic.fallbackReason === 'provider_not_configured') return 'provider is not configured.'
+  if (diagnostic.fallbackReason === 'provider_error') return diagnostic.providerErrorMessage || 'provider call failed.'
+  if (diagnostic.fallbackReason === 'parse_failed') return 'model response could not be parsed.'
+  if (diagnostic.fallbackReason === 'validation_failed') return diagnostic.validationErrors?.[0] || 'model response failed validation.'
+  return diagnostic.fallbackReason || 'deterministic fallback used.'
+}
+
+function formatQuickDisplayedSource(source: QuickDisplayedSource): string {
+  if (source === 'deterministic_fallback') return 'deterministic fallback'
+  if (source === 'llm_normalized') return 'LLM synthesis, normalized'
+  if (source === 'retry') return 'LLM synthesis after retry'
+  if (source === 'retry_normalized') return 'Retry synthesis, normalized'
+  return 'LLM synthesis'
+}
+
 function DomainIQSection({
   value,
   onChange,
+  company,
+  roleTitle,
+  jdText,
 }: {
   value: string
   onChange: (v: string) => void
+  company: string
+  roleTitle: string
+  jdText: string
 }) {
   const [mode, setMode] = useState<DomainIQMode>(null)
   const [jsonError, setJsonError] = useState('')
+  const [quickIndustry, setQuickIndustry] = useState('')
+  const [quickNotes, setQuickNotes] = useState('')
+  const [quickGenerating, setQuickGenerating] = useState(false)
+  const [quickStatus, setQuickStatus] = useState('')
+  const [quickDiagnostic, setQuickDiagnostic] = useState<QuickStartDiagnostic | null>(null)
+  const [quickDisplayedSource, setQuickDisplayedSource] = useState<QuickDisplayedSource | null>(null)
 
   // Auto-detect JSON when user pastes into JSON mode
   function handleJsonChange(raw: string) {
     setJsonError('')
+    setQuickDisplayedSource(null)
     onChange(raw)
     if (raw.trim()) {
       const parsed = tryParseDomainIQJson(raw)
@@ -480,6 +537,55 @@ function DomainIQSection({
 
   const parsedPreview = mode === 'json' && value.trim() ? tryParseDomainIQJson(value) : null
 
+  async function handleGenerateQuickStart() {
+    setJsonError('')
+    setQuickStatus('Generating JD + inferred problem-space synthesis...')
+    setQuickDiagnostic(null)
+    setQuickDisplayedSource(null)
+    setQuickGenerating(true)
+    try {
+      const res = await fetch('/api/company-industry-basis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetCompany: company,
+          targetRoleTitle: roleTitle,
+          jobDescription: jdText,
+          industry: quickIndustry,
+          userNotes: quickNotes,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error ?? 'Company / industry basis generation failed.')
+      }
+      const result = await res.json() as {
+        domainIQJson: string
+        mode: 'llm' | 'llm_normalized' | 'retry' | 'retry_normalized' | 'fallback' | 'mock'
+        diagnostic?: QuickStartDiagnostic
+      }
+      onChange(result.domainIQJson)
+      setMode('json')
+      setQuickDiagnostic(result.diagnostic ?? null)
+      const displayedSource = result.diagnostic?.displayedJsonSource
+        ?? (result.mode === 'fallback' ? 'deterministic_fallback' : result.mode === 'mock' ? 'llm' : result.mode)
+      setQuickDisplayedSource(displayedSource)
+      setQuickStatus(
+        result.mode === 'fallback'
+          ? `LLM synthesis fell back: ${formatQuickStartFallbackReason(result.diagnostic)}`
+          : result.diagnostic?.mode === 'retry' || result.diagnostic?.mode === 'retry_normalized'
+            ? 'Basis generated from LLM synthesis after retry. Review/edit before analysis.'
+            : result.diagnostic?.mode === 'llm_normalized'
+              ? 'Basis generated from LLM synthesis and normalized for DomainIQ. Review/edit before analysis.'
+          : 'Basis generated from JD + inferred problem-space synthesis. Review/edit before analysis.',
+      )
+    } catch (err) {
+      setQuickStatus(err instanceof Error ? err.message : 'Company / industry basis generation failed.')
+    } finally {
+      setQuickGenerating(false)
+    }
+  }
+
   return (
     <div>
       <SectionLabel n="3" text="Company Research" />
@@ -487,6 +593,99 @@ function DomainIQSection({
         Optional. Augments the JD with company context, tech stack, and culture signals.
       </p>
       <div className="space-y-2">
+        <div className="border border-blue-100 bg-blue-50/70 rounded-lg p-4 space-y-3">
+          <div>
+            <h3 className="text-sm font-medium text-blue-950">Quick Start: Company / Industry Basis</h3>
+            <p className="text-xs text-blue-800/80 mt-1">
+              Generate a JD + inferred problem-space synthesis from the company, role, JD, and optional domain notes.
+              This creates structured DomainIQ-compatible JSON; it does not draft resume text.
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-blue-950 mb-1">Industry / domain (optional)</label>
+              <input
+                className={inputCls}
+                value={quickIndustry}
+                onChange={e => setQuickIndustry(e.target.value)}
+                placeholder="e.g. logistics, fintech, SaaS operations"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-blue-950 mb-1">User notes (optional)</label>
+              <input
+                className={inputCls}
+                value={quickNotes}
+                onChange={e => setQuickNotes(e.target.value)}
+                placeholder="Known workflows, users, risks, or priorities"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleGenerateQuickStart}
+              disabled={quickGenerating || !company.trim() || !roleTitle.trim() || !jdText.trim()}
+              className="px-3 py-1.5 bg-blue-700 text-white rounded text-xs font-medium hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {quickGenerating ? 'Generating...' : 'Generate Quick Company Basis'}
+            </button>
+            {quickStatus && (
+              <span className="text-xs text-blue-800">
+                {quickStatus}
+              </span>
+            )}
+            {quickDiagnostic && (
+              <div className="w-full rounded border border-blue-200 bg-white/70 px-3 py-2 text-[11px] text-blue-950">
+                <div className="font-medium">Quick Start diagnostic</div>
+                {quickDiagnostic.mode === 'deterministic_fallback' && quickDiagnostic.fallbackReason === 'validation_failed' && (
+                  <div className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-amber-900">
+                    LLM synthesis failed validation; deterministic fallback inserted.
+                  </div>
+                )}
+                <div className="mt-1 grid gap-x-4 gap-y-1 sm:grid-cols-2">
+                  <span>mode: {quickDiagnostic.mode}</span>
+                  <span>providerConfigured: {String(quickDiagnostic.providerConfigured)}</span>
+                  <span>apiRouteReached: {String(quickDiagnostic.apiRouteReached)}</span>
+                  <span>modelCallAttempted: {String(quickDiagnostic.modelCallAttempted)}</span>
+                  <span>modelCallSucceeded: {String(quickDiagnostic.modelCallSucceeded)}</span>
+                  <span>parseSucceeded: {String(quickDiagnostic.parseSucceeded)}</span>
+                  <span>validationSucceeded: {String(quickDiagnostic.validationSucceeded)}</span>
+                  <span>normalizationAttempted: {String(Boolean(quickDiagnostic.normalizationAttempted))}</span>
+                  <span>normalizationSucceeded: {String(Boolean(quickDiagnostic.normalizationSucceeded))}</span>
+                  <span>retryAttempted: {String(quickDiagnostic.retryAttempted)}</span>
+                  <span>retrySucceeded: {String(quickDiagnostic.retrySucceeded)}</span>
+                  {quickDiagnostic.fallbackReason && <span className="sm:col-span-2">fallbackReason: {quickDiagnostic.fallbackReason}</span>}
+                  {quickDiagnostic.providerErrorName && <span className="sm:col-span-2">providerErrorName: {quickDiagnostic.providerErrorName}</span>}
+                  {quickDiagnostic.providerErrorMessage && <span className="sm:col-span-2">providerErrorMessage: {quickDiagnostic.providerErrorMessage}</span>}
+                  {quickDiagnostic.validationErrors?.length ? (
+                    <span className="sm:col-span-2">validationErrors: {quickDiagnostic.validationErrors.join(' | ')}</span>
+                  ) : null}
+                  {quickDiagnostic.normalizedWarnings?.length ? (
+                    <span className="sm:col-span-2">normalizedWarnings: {quickDiagnostic.normalizedWarnings.join(' | ')}</span>
+                  ) : null}
+                  {quickDiagnostic.rejectedAttemptNumber && <span className="sm:col-span-2">rejectedAttemptNumber: {quickDiagnostic.rejectedAttemptNumber}</span>}
+                </div>
+                {quickDiagnostic.rejectedOutputPreview && (
+                  <details className="mt-2 rounded border border-blue-100 bg-blue-50/60 px-2 py-1.5">
+                    <summary className="cursor-pointer font-medium">Rejected LLM output preview</summary>
+                    <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded bg-white p-2 font-mono text-[10px] leading-relaxed text-blue-950">
+                      {quickDiagnostic.rejectedBasisPreview || quickDiagnostic.rejectedOutputPreview}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            )}
+            {(!company.trim() || !roleTitle.trim() || !jdText.trim()) && (
+              <span className="text-xs text-blue-700/80">
+                Requires company, role title, and pasted/fetched JD.
+              </span>
+            )}
+          </div>
+        </div>
+
         <Collapse
           label="Paste DomainIQ JSON"
           hint="Structured export — company profile, tech stack, industry signals"
@@ -495,6 +694,11 @@ function DomainIQSection({
         >
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">DomainIQ JSON export</label>
+            {quickDisplayedSource && (
+              <p className="text-xs font-medium text-gray-600 mb-1">
+                Displayed JSON source: {formatQuickDisplayedSource(quickDisplayedSource)}
+              </p>
+            )}
             <p className="text-xs text-gray-400 mb-2">
               Paste the full JSON object from a DomainIQ export. Fields:{' '}
               <code className="text-gray-500">companyProfile</code>,{' '}
@@ -807,7 +1011,13 @@ export function IntakeForm() {
 
       <div className="border-t border-gray-100 pt-6" />
 
-      <DomainIQSection value={domainIQText} onChange={setDomainIQText} />
+      <DomainIQSection
+        value={domainIQText}
+        onChange={setDomainIQText}
+        company={company}
+        roleTitle={roleTitle}
+        jdText={jdText}
+      />
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
@@ -860,6 +1070,7 @@ export function IntakeForm() {
         <div className="mt-8 space-y-8">
           <IntakeSynthesisView synthesis={result.synthesis} />
           <JDRequirementMapView map={result.requirementMap} />
+          <Stage1FindingsView findings={result.fitAnalysis?.findings} />
         </div>
       )}
     </div>

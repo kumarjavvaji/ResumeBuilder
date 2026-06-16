@@ -37,6 +37,27 @@ export async function deleteStage4RawResumeText(sessionId: string): Promise<void
   await db.stage4RawResumeTexts.where('sessionId').equals(sessionId).delete()
 }
 
+/**
+ * Updates the sections field of the raw resume record in-place.
+ * Used exclusively by auto-repair to store the repaired text back into
+ * sections.* without touching refinementOutput or refinementAccepted.
+ * The refinement* fields must only be written by explicit user refinement flows.
+ */
+export async function updateStage4RawResumeTextSections(
+  sessionId: string,
+  sections: import('@/contracts').Stage4RawResumeSections,
+): Promise<Stage4RawResumeText | undefined> {
+  const existing = await getStage4RawResumeText(sessionId)
+  if (!existing) return undefined
+  const updated: Stage4RawResumeText = {
+    ...existing,
+    sections,
+    updatedAt: new Date().toISOString(),
+  }
+  await db.stage4RawResumeTexts.put(updated)
+  return updated
+}
+
 // ─── Full-resume refinement helpers ──────────────────────────────────────────
 
 export async function saveStage4FullRefinement(

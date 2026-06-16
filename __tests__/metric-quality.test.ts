@@ -151,6 +151,21 @@ describe('B: validateBulletMetrics', () => {
     const bullets = ['- Reduced 50-80 support tickets per month through clearer documentation.']
     expect(validateBulletMetrics(bullets, STRICT_POLICY)).toHaveLength(0)
   })
+
+  it('B13: bare processed count without workload noun does not trigger volume violation', () => {
+    const bullets = ['- Processed 2 release decisions through stakeholder review.']
+    expect(validateBulletMetrics(bullets, STRICT_POLICY)).toHaveLength(0)
+  })
+
+  it('B14: biweekly cadence improvement with impact language does not trigger volume violation', () => {
+    const bullets = ['- Integrated smoke and regression suites into CI pipeline, strengthening quality and accelerating release cadence from monthly to biweekly.']
+    expect(validateBulletMetrics(bullets, STRICT_POLICY)).toHaveLength(0)
+  })
+
+  it('B15: education degree text is not a volume metric', () => {
+    const bullets = ['BS | Electrical and Computer Engineering | Example University']
+    expect(validateBulletMetrics(bullets, STRICT_POLICY)).toHaveLength(0)
+  })
 })
 
 // ─── Suite C — policy interaction ─────────────────────────────────────────────
