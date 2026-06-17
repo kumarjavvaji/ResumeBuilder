@@ -290,7 +290,7 @@ function derivePatternSignalFromBullets(accepted: ArtifactSection[], session: Ta
   if (allBullets.length < 2) return null
 
   // Find the section with the most accepted bullets.
-  const counts = new Map<string, number>()
+  const counts = new Map<ArtifactSection['type'], number>()
   for (const { section } of allBullets) counts.set(section, (counts.get(section) ?? 0) + 1)
   const [[dominantSection, count]] = [...counts.entries()].sort((a, b) => b[1] - a[1])
 

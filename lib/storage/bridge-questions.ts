@@ -34,3 +34,9 @@ export async function getAnsweredQuestions(sessionId: string): Promise<BridgeQue
     .and(q => q.status === 'answered')
     .toArray()
 }
+
+export async function getAllAnsweredQuestions(): Promise<BridgeQuestion[]> {
+  return db.bridgeQuestions
+    .where('status').equals('answered')
+    .toArray()
+}

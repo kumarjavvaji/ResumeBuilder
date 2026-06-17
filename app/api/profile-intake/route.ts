@@ -17,9 +17,9 @@ export async function POST(req: NextRequest) {
     }
 
     const ext = file.name.split('.').pop()?.toLowerCase()
-    if (!['pdf', 'docx', 'doc'].includes(ext ?? '')) {
+    if (!['pdf', 'docx', 'doc', 'txt'].includes(ext ?? '')) {
       return NextResponse.json(
-        { error: 'Unsupported file type. Upload a PDF or DOCX.' },
+        { error: 'Unsupported file type. Upload a PDF, DOCX, or TXT.' },
         { status: 400 }
       )
     }
@@ -33,6 +33,15 @@ export async function POST(req: NextRequest) {
 
     if (ext === 'pdf') {
       signals = await extractFromPdf(buffer, warnings)
+    } else if (ext === 'txt') {
+      const text = buffer.toString('utf-8').trim()
+      if (!text) {
+        return NextResponse.json(
+          { error: 'Text file appears to be empty.' },
+          { status: 400 }
+        )
+      }
+      signals = await extractProfileSignals(text)
     } else {
       const text = await extractDocxText(buffer, warnings)
       if (!text) {

@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { getSession, updateSessionStatus } from '@/lib/storage/sessions'
 import { getUserProfile } from '@/lib/storage/user-profile'
 import { saveBridgeQuestions, getSessionBridgeQuestions, updateBridgeQuestion } from '@/lib/storage/bridge-questions'
+import { promoteBridgeAnswerToProfile } from '@/lib/profile/promoteBridgeAnswer'
 import type { BridgeQuestion, TargetIntake } from '@/contracts'
 import { Spinner } from '@/components/shared/spinner'
 import { inputCls, textareaCls } from '@/lib/input-cls'
@@ -168,7 +169,8 @@ export function BridgeQuestionsPage({ sessionId }: { sessionId: string }) {
           jdMap: session.jdRequirementMap,
           profile,
           emphasis: session.emphasisRecommendation,
-          sessionId
+          sessionId,
+          fitAnalysis: session.fitAnalysis
         })
       })
       if (!res.ok) throw new Error((await res.json()).error)
@@ -186,6 +188,14 @@ export function BridgeQuestionsPage({ sessionId }: { sessionId: string }) {
   async function handleAnswer(id: string, answer: string) {
     await updateBridgeQuestion(id, { status: 'answered', userAnswer: answer })
     setQuestions(qs => qs.map(q => q.id === id ? { ...q, status: 'answered', userAnswer: answer } : q))
+    const question = questions.find(q => q.id === id)
+    if (question) {
+      try {
+        await promoteBridgeAnswerToProfile(question, answer, sessionId)
+      } catch (err) {
+        console.error('promoteBridgeAnswerToProfile failed — answer saved but not promoted to profile:', err)
+      }
+    }
   }
 
   async function handleSkip(id: string) {

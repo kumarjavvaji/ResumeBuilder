@@ -58,7 +58,7 @@ export function normalizeExtractedSignals(
   sourceId: string,
   now: string
 ) {
-  const claims = raw.claims.map(c => ({
+  const claims = (raw.claims ?? []).map(c => ({
     claimId: nanoid(),
     normalizedKey: normalizeKey(c.text),
     text: c.text,
@@ -71,7 +71,7 @@ export function normalizeExtractedSignals(
     status: 'active' as const,
   }))
 
-  const skills = raw.skills.map(s => ({
+  const skills = (raw.skills ?? []).map(s => ({
     skillId: nanoid(),
     name: s.name,
     normalizedKey: normalizeKey(s.name),
@@ -80,7 +80,7 @@ export function normalizeExtractedSignals(
     evidenceStrength: 'medium' as const,
   }))
 
-  const roles = raw.roles.map(r => ({
+  const roles = (raw.roles ?? []).map(r => ({
     roleId: nanoid(),
     title: r.title,
     normalizedKey: normalizeRole(r.title),
@@ -90,7 +90,7 @@ export function normalizeExtractedSignals(
     sourceIds: [sourceId],
   }))
 
-  const metrics = raw.metrics.map(m => ({
+  const metrics = (raw.metrics ?? []).map(m => ({
     metricId: nanoid(),
     text: m.text,
     normalizedKey: normalizeMetric(m.text),
@@ -98,7 +98,7 @@ export function normalizeExtractedSignals(
     sourceIds: [sourceId],
   }))
 
-  const tools = raw.tools.map(t => ({
+  const tools = (raw.tools ?? []).map(t => ({
     toolId: nanoid(),
     name: t.name,
     normalizedKey: normalizeTool(t.name),
@@ -106,7 +106,7 @@ export function normalizeExtractedSignals(
     sourceIds: [sourceId],
   }))
 
-  const domains = raw.domains.map(d => ({
+  const domains = (raw.domains ?? []).map(d => ({
     domainId: nanoid(),
     name: d.name,
     normalizedKey: normalizeDomain(d.name),

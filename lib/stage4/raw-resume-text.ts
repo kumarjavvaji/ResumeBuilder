@@ -1,5 +1,9 @@
 import type {
   ArtifactSection,
+  JDRequirementMap,
+  ResumeGenerationContract,
+  ResumeReadinessContract,
+  ResumeStrategyBrief,
   SectionType,
   Stage4ExperienceBlock,
   Stage4RawResumeSections,
@@ -9,6 +13,10 @@ import type {
   UserProfile,
   WorkEntry
 } from '@/contracts'
+import { applyDeterministicRepairs, validateResumeAgainstContract } from './resume-generation-contract'
+import { reviewCriticalResumeArtifact } from './critical-resume-review'
+import type { ReviewEvidenceItem, ReviewSectionStrategy } from './critical-resume-review'
+import { buildStage4QualityTrace } from './quality-trace'
 
 export const REQUIRED_RESUME_SECTION_TYPES: SectionType[] = [
   'summary',
@@ -60,6 +68,10 @@ export interface BuildStage4RawResumeTextOptions {
   profile: UserProfile
   allowDraft?: boolean
   structureSource?: Stage4StructureSource
+  contract?: ResumeGenerationContract
+  readinessContract?: ResumeReadinessContract
+  strategyBrief?: ResumeStrategyBrief
+  jdMap?: JDRequirementMap
 }
 
 export function getStage4Readiness(sections: ArtifactSection[]): Stage4Readiness {
@@ -97,8 +109,52 @@ export function buildStage4RawResumeText(opts: BuildStage4RawResumeTextOptions):
   const skills = naturalizeSkills(byType.get('skills')?.content ?? '')
   const experiences = buildExperienceBlocks(byType, opts.profile)
   const education = buildEducationText(opts.profile)
-  const sections = assembleSections({ summary, skills, experiences, education })
+  let assembled = assembleSections({ summary, skills, experiences, education })
   const sourceArtifacts = eligible.filter(s => REQUIRED_RESUME_SECTION_TYPES.includes(s.type))
+
+  // Apply deterministic repairs if a contract was provided
+  let repairsAppliedCount = 0
+  if (opts.contract) {
+    const { repairedText, repairsApplied } = applyDeterministicRepairs(
+      assembled.fullText,
+      opts.contract,
+      'fullText'
+    )
+    if (repairsApplied.length > 0) {
+      assembled = { ...assembled, fullText: repairedText }
+      warnings.push(...repairsApplied.map(r => `[auto-repair] ${r}`))
+      repairsAppliedCount = repairsApplied.length
+    }
+  }
+
+  // Run deterministic validation
+  const validation = opts.contract
+    ? validateResumeAgainstContract(assembled.fullText, opts.contract)
+    : null
+
+  // Run critical review when both strategy brief and JD map are available
+  const reviewEvidenceMap = buildReviewEvidenceMap(sourceArtifacts)
+  const review =
+    opts.strategyBrief && opts.jdMap
+      ? reviewCriticalResumeArtifact({
+          targetJd: opts.jdMap,
+          resumeBlueprint: opts.contract?.targetPosture ?? '',
+          evidenceMap: reviewEvidenceMap,
+          sectionStrategies: buildReviewSectionStrategies(opts.strategyBrief, reviewEvidenceMap),
+          artifactText: assembled.fullText,
+          deterministicValidation: validation ?? undefined,
+          strategyBrief: opts.strategyBrief,
+        })
+      : null
+
+  const qualityTrace = buildStage4QualityTrace({
+    sessionId: opts.sessionId,
+    strategyBrief: opts.strategyBrief,
+    contract: opts.contract,
+    validation,
+    review,
+    deterministicRepairsApplied: repairsAppliedCount,
+  })
 
   return {
     sessionId: opts.sessionId,
@@ -106,9 +162,13 @@ export function buildStage4RawResumeText(opts: BuildStage4RawResumeTextOptions):
     sourceArtifactSectionIds: sourceArtifacts.map(s => s.id),
     sourceArtifactSnapshots: sourceArtifacts.map(snapshotSourceArtifact),
     structureSource: opts.structureSource ?? inferStructureSource(opts.profile),
-    sections,
+    sections: assembled,
     warnings,
-    staleReasons: []
+    staleReasons: [],
+    contract: opts.contract,
+    readinessContract: opts.readinessContract,
+    strategyBrief: opts.strategyBrief,
+    qualityTrace,
   }
 }
 
@@ -288,6 +348,70 @@ function assembleSections(parts: Omit<Stage4RawResumeSections, 'fullText'>): Sta
   }
 }
 
+/**
+ * Re-parses experience bullet lines from the repaired experience section text.
+ * Uses positional matching: the i-th text block maps to the i-th original block.
+ * Only `bullets` is updated — roleId, title, company, dates, headingText, and
+ * sourceArtifactSectionId are always preserved from the original block.
+ */
+export function parseExperienceBlocksFromText(
+  experienceText: string,
+  originalBlocks: Stage4ExperienceBlock[],
+): Stage4ExperienceBlock[] {
+  if (!experienceText.trim() || originalBlocks.length === 0) return originalBlocks
+
+  const rawBlocks = experienceText.split(/\n\n+/).map(b => b.trim()).filter(Boolean)
+  if (rawBlocks.length === 0) return originalBlocks
+
+  return originalBlocks.map((orig, i) => {
+    const raw = rawBlocks[i]
+    if (!raw) return orig
+    const bullets = raw
+      .split('\n')
+      .filter(l => l.startsWith('- '))
+      .map(l => l.slice(2))
+    return bullets.length > 0 ? { ...orig, bullets } : orig
+  })
+}
+
+/**
+ * Parses a repaired full-text resume back into Stage4RawResumeSections.
+ *
+ * Used by auto-repair to update sections.* in-place so all section cards
+ * reflect the repaired content. Structural metadata on experience blocks
+ * (roleId, title, company, dates, sourceArtifactSectionId) is always kept
+ * from the original; only bullet text is updated.
+ */
+export function parseSectionsFromRepairedText(
+  fullText: string,
+  original: Stage4RawResumeSections,
+): Stage4RawResumeSections {
+  // No 'm' flag so '$' anchors to end-of-string, not end-of-line.
+  // Sections are separated by '\n\nLABEL\n' in the assembled format.
+  const ALL_LABELS = 'SUMMARY|SKILLS|EXPERIENCE|EDUCATION'
+  function extractSection(label: string): string {
+    const re = new RegExp(
+      `(?:^|\\n)${label}\\n([\\s\\S]*?)(?=\\n\\n(?:${ALL_LABELS})\\n|$)`,
+    )
+    const m = fullText.match(re)
+    return m ? m[1].trim() : ''
+  }
+
+  const summary = extractSection('SUMMARY') || original.summary
+  const skills = extractSection('SKILLS') || original.skills
+  const education = extractSection('EDUCATION') || original.education
+  const experienceText = extractSection('EXPERIENCE')
+  const experiences = parseExperienceBlocksFromText(experienceText, original.experiences)
+
+  return {
+    summary,
+    skills,
+    experiences,
+    education,
+    fullText,
+  }
+}
+
 export function formatExperienceBlock(block: Stage4ExperienceBlock): string {
   const header = [
     block.title,
@@ -311,4 +435,27 @@ function inferStructureSource(profile: UserProfile): Stage4StructureSource {
   return profile.workHistory.length > 0 || profile.education.length > 0
     ? 'manual_profile'
     : 'default'
+}
+
+function buildReviewEvidenceMap(sections: ArtifactSection[]): ReviewEvidenceItem[] {
+  return sections.map((section, index) => ({
+    id: `E${index + 1}`,
+    text: section.content,
+    allowedSections: [section.type],
+    confidence: section.status === 'accepted' ? 'high' : 'medium',
+  }))
+}
+
+function buildReviewSectionStrategies(
+  strategyBrief: ResumeStrategyBrief | undefined,
+  evidenceMap: ReviewEvidenceItem[],
+): ReviewSectionStrategy[] {
+  return [
+    {
+      sectionKey: 'experience',
+      sectionPurpose: 'proof',
+      requiredThemes: strategyBrief?.jdCriticalThemes.map(theme => theme.theme) ?? [],
+      allowedEvidenceIds: evidenceMap.map(evidence => evidence.id),
+    },
+  ]
 }

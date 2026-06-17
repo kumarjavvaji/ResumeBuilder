@@ -1,9 +1,11 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { getUserProfile } from '@/lib/storage/user-profile'
 import { saveSession } from '@/lib/storage/sessions'
 import { nanoid } from '@/lib/storage/nanoid'
+import { getActiveSnapshot } from '@/lib/profile/profileSnapshotStore'
+import { buildEvidenceIndex } from '@/lib/profile/profileProjectionService'
 import type {
   TargetIntake,
   Stage1Status,
@@ -12,11 +14,14 @@ import type {
   JDRequirementMap,
   DomainIQImport,
   FitAnalysis,
+  UserProfile,
+  ProfileEvidenceIndexItem,
 } from '@/contracts'
 import { deriveStageStatuses, canCompleteStage1 } from '@/contracts'
 import { Spinner } from '@/components/shared/spinner'
 import { inputCls, textareaCls } from '@/lib/input-cls'
 import { JDRequirementMapView } from './jd-requirement-map-view'
+import { findFindingByTopic, TraceChip, TraceableBullet, computeUnmatchedFindings, UnmatchedFindingsDebug } from './stage1-findings-view'
 
 // ─── Stage1Status derivation ──────────────────────────────────────────────────
 
@@ -82,52 +87,36 @@ function SectionLabel({ n, text }: { n: string; text: string }) {
 
 // ─── Step 1: Resume / Profile ─────────────────────────────────────────────────
 
-type ProfileMode = 'upload' | 'use-saved' | null
-
-function ProfileSection({ mode, onMode }: { mode: ProfileMode; onMode: (m: ProfileMode) => void }) {
+function ProfileSection({ profile }: { profile: UserProfile | null | undefined }) {
   return (
     <div>
-      <SectionLabel n="1" text="Resume / Profile" />
-      <div className="space-y-2">
-        <Collapse
-          label="Upload existing resume"
-          hint="PDF or Word — parsed into profile fields"
-          open={mode === 'upload'}
-          onToggle={() => onMode(mode === 'upload' ? null : 'upload')}
-        >
-          <label className="block text-xs font-medium text-gray-700 mb-1">Resume file</label>
-          <p className="text-xs text-gray-500 mb-2">
-            Upload a PDF or Word resume. The system will parse it into your profile fields.
+      <SectionLabel n="1" text="Candidate Profile" />
+      {profile === undefined ? (
+        <p className="text-xs text-gray-400">Loading profile...</p>
+      ) : profile === null ? (
+        <div className="border border-amber-200 bg-amber-50 rounded-lg px-4 py-3">
+          <p className="text-sm text-amber-800">
+            No saved profile found. Go to{' '}
+            <a href="/profile" className="underline hover:text-amber-900">/profile</a>{' '}
+            and complete it before starting a session.
           </p>
-          <input
-            type="file"
-            accept=".pdf,.doc,.docx"
-            className="text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border file:border-gray-300 file:text-xs file:font-medium file:bg-white hover:file:bg-gray-50"
-          />
-          <p className="text-xs text-amber-600">Resume parsing is coming soon. Use your saved profile for now.</p>
-        </Collapse>
-
-        <Collapse
-          label="Use saved profile"
-          hint="Pull from your /profile work history"
-          open={mode === 'use-saved'}
-          onToggle={() => onMode(mode === 'use-saved' ? null : 'use-saved')}
-        >
-          <p className="text-xs text-gray-500">
-            Your profile from{' '}
-            <a href="/profile" className="underline hover:text-gray-700">
-              /profile
-            </a>{' '}
-            will be used as the candidate context for this session.
+        </div>
+      ) : (
+        <div className="border border-gray-200 rounded-lg px-4 py-3 bg-gray-50">
+          <p className="text-sm text-gray-700">
+            Your saved profile will be used as candidate context for this session.
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            {profile.fullName} · {profile.workHistory.length} role{profile.workHistory.length === 1 ? '' : 's'} · {profile.skills.length} skill{profile.skills.length === 1 ? '' : 's'}
           </p>
           <a
             href="/profile"
-            className="inline-block text-xs font-medium text-gray-900 underline underline-offset-2 hover:text-gray-600"
+            className="inline-block mt-2 text-xs font-medium text-gray-900 underline underline-offset-2 hover:text-gray-600"
           >
             Review or edit profile →
           </a>
-        </Collapse>
-      </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -456,19 +445,75 @@ function tryParseDomainIQJson(raw: string): {
   return null
 }
 
+interface QuickStartDiagnostic {
+  mode: 'llm' | 'llm_normalized' | 'retry' | 'retry_normalized' | 'deterministic_fallback'
+  providerConfigured: boolean
+  apiRouteReached: boolean
+  modelCallAttempted: boolean
+  modelCallSucceeded: boolean
+  parseSucceeded: boolean
+  validationSucceeded: boolean
+  normalizationAttempted?: boolean
+  normalizationSucceeded?: boolean
+  retryAttempted: boolean
+  retrySucceeded: boolean
+  fallbackReason: string
+  validationErrors?: string[]
+  normalizedWarnings?: string[]
+  rejectedAttemptNumber?: number
+  rejectedOutputPreview?: string
+  rejectedBasisPreview?: string
+  normalizedOutputPreview?: string
+  displayedJsonSource?: QuickDisplayedSource
+  providerErrorName?: string
+  providerErrorMessage?: string
+}
+
+type QuickDisplayedSource = 'llm' | 'llm_normalized' | 'retry' | 'retry_normalized' | 'deterministic_fallback'
+
+function formatQuickStartFallbackReason(diagnostic: QuickStartDiagnostic | undefined): string {
+  if (!diagnostic) return 'deterministic fallback used; no diagnostic returned.'
+  if (diagnostic.fallbackReason === 'provider_not_configured') return 'provider is not configured.'
+  if (diagnostic.fallbackReason === 'provider_error') return diagnostic.providerErrorMessage || 'provider call failed.'
+  if (diagnostic.fallbackReason === 'parse_failed') return 'model response could not be parsed.'
+  if (diagnostic.fallbackReason === 'validation_failed') return diagnostic.validationErrors?.[0] || 'model response failed validation.'
+  return diagnostic.fallbackReason || 'deterministic fallback used.'
+}
+
+function formatQuickDisplayedSource(source: QuickDisplayedSource): string {
+  if (source === 'deterministic_fallback') return 'deterministic fallback'
+  if (source === 'llm_normalized') return 'LLM synthesis, normalized'
+  if (source === 'retry') return 'LLM synthesis after retry'
+  if (source === 'retry_normalized') return 'Retry synthesis, normalized'
+  return 'LLM synthesis'
+}
+
 function DomainIQSection({
   value,
   onChange,
+  company,
+  roleTitle,
+  jdText,
 }: {
   value: string
   onChange: (v: string) => void
+  company: string
+  roleTitle: string
+  jdText: string
 }) {
   const [mode, setMode] = useState<DomainIQMode>(null)
   const [jsonError, setJsonError] = useState('')
+  const [quickIndustry, setQuickIndustry] = useState('')
+  const [quickNotes, setQuickNotes] = useState('')
+  const [quickGenerating, setQuickGenerating] = useState(false)
+  const [quickStatus, setQuickStatus] = useState('')
+  const [quickDiagnostic, setQuickDiagnostic] = useState<QuickStartDiagnostic | null>(null)
+  const [quickDisplayedSource, setQuickDisplayedSource] = useState<QuickDisplayedSource | null>(null)
 
   // Auto-detect JSON when user pastes into JSON mode
   function handleJsonChange(raw: string) {
     setJsonError('')
+    setQuickDisplayedSource(null)
     onChange(raw)
     if (raw.trim()) {
       const parsed = tryParseDomainIQJson(raw)
@@ -480,6 +525,55 @@ function DomainIQSection({
 
   const parsedPreview = mode === 'json' && value.trim() ? tryParseDomainIQJson(value) : null
 
+  async function handleGenerateQuickStart() {
+    setJsonError('')
+    setQuickStatus('Generating JD + inferred problem-space synthesis...')
+    setQuickDiagnostic(null)
+    setQuickDisplayedSource(null)
+    setQuickGenerating(true)
+    try {
+      const res = await fetch('/api/company-industry-basis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetCompany: company,
+          targetRoleTitle: roleTitle,
+          jobDescription: jdText,
+          industry: quickIndustry,
+          userNotes: quickNotes,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error ?? 'Company / industry basis generation failed.')
+      }
+      const result = await res.json() as {
+        domainIQJson: string
+        mode: 'llm' | 'llm_normalized' | 'retry' | 'retry_normalized' | 'fallback' | 'mock'
+        diagnostic?: QuickStartDiagnostic
+      }
+      onChange(result.domainIQJson)
+      setMode('json')
+      setQuickDiagnostic(result.diagnostic ?? null)
+      const displayedSource = result.diagnostic?.displayedJsonSource
+        ?? (result.mode === 'fallback' ? 'deterministic_fallback' : result.mode === 'mock' ? 'llm' : result.mode)
+      setQuickDisplayedSource(displayedSource)
+      setQuickStatus(
+        result.mode === 'fallback'
+          ? `LLM synthesis fell back: ${formatQuickStartFallbackReason(result.diagnostic)}`
+          : result.diagnostic?.mode === 'retry' || result.diagnostic?.mode === 'retry_normalized'
+            ? 'Basis generated from LLM synthesis after retry. Review/edit before analysis.'
+            : result.diagnostic?.mode === 'llm_normalized'
+              ? 'Basis generated from LLM synthesis and normalized for DomainIQ. Review/edit before analysis.'
+          : 'Basis generated from JD + inferred problem-space synthesis. Review/edit before analysis.',
+      )
+    } catch (err) {
+      setQuickStatus(err instanceof Error ? err.message : 'Company / industry basis generation failed.')
+    } finally {
+      setQuickGenerating(false)
+    }
+  }
+
   return (
     <div>
       <SectionLabel n="3" text="Company Research" />
@@ -487,6 +581,99 @@ function DomainIQSection({
         Optional. Augments the JD with company context, tech stack, and culture signals.
       </p>
       <div className="space-y-2">
+        <div className="border border-blue-100 bg-blue-50/70 rounded-lg p-4 space-y-3">
+          <div>
+            <h3 className="text-sm font-medium text-blue-950">Quick Start: Company / Industry Basis</h3>
+            <p className="text-xs text-blue-800/80 mt-1">
+              Generate a JD + inferred problem-space synthesis from the company, role, JD, and optional domain notes.
+              This creates structured DomainIQ-compatible JSON; it does not draft resume text.
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-blue-950 mb-1">Industry / domain (optional)</label>
+              <input
+                className={inputCls}
+                value={quickIndustry}
+                onChange={e => setQuickIndustry(e.target.value)}
+                placeholder="e.g. logistics, fintech, SaaS operations"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-blue-950 mb-1">User notes (optional)</label>
+              <input
+                className={inputCls}
+                value={quickNotes}
+                onChange={e => setQuickNotes(e.target.value)}
+                placeholder="Known workflows, users, risks, or priorities"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleGenerateQuickStart}
+              disabled={quickGenerating || !company.trim() || !roleTitle.trim() || !jdText.trim()}
+              className="px-3 py-1.5 bg-blue-700 text-white rounded text-xs font-medium hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {quickGenerating ? 'Generating...' : 'Generate Quick Company Basis'}
+            </button>
+            {quickStatus && (
+              <span className="text-xs text-blue-800">
+                {quickStatus}
+              </span>
+            )}
+            {quickDiagnostic && (
+              <div className="w-full rounded border border-blue-200 bg-white/70 px-3 py-2 text-[11px] text-blue-950">
+                <div className="font-medium">Quick Start diagnostic</div>
+                {quickDiagnostic.mode === 'deterministic_fallback' && quickDiagnostic.fallbackReason === 'validation_failed' && (
+                  <div className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-amber-900">
+                    LLM synthesis failed validation; deterministic fallback inserted.
+                  </div>
+                )}
+                <div className="mt-1 grid gap-x-4 gap-y-1 sm:grid-cols-2">
+                  <span>mode: {quickDiagnostic.mode}</span>
+                  <span>providerConfigured: {String(quickDiagnostic.providerConfigured)}</span>
+                  <span>apiRouteReached: {String(quickDiagnostic.apiRouteReached)}</span>
+                  <span>modelCallAttempted: {String(quickDiagnostic.modelCallAttempted)}</span>
+                  <span>modelCallSucceeded: {String(quickDiagnostic.modelCallSucceeded)}</span>
+                  <span>parseSucceeded: {String(quickDiagnostic.parseSucceeded)}</span>
+                  <span>validationSucceeded: {String(quickDiagnostic.validationSucceeded)}</span>
+                  <span>normalizationAttempted: {String(Boolean(quickDiagnostic.normalizationAttempted))}</span>
+                  <span>normalizationSucceeded: {String(Boolean(quickDiagnostic.normalizationSucceeded))}</span>
+                  <span>retryAttempted: {String(quickDiagnostic.retryAttempted)}</span>
+                  <span>retrySucceeded: {String(quickDiagnostic.retrySucceeded)}</span>
+                  {quickDiagnostic.fallbackReason && <span className="sm:col-span-2">fallbackReason: {quickDiagnostic.fallbackReason}</span>}
+                  {quickDiagnostic.providerErrorName && <span className="sm:col-span-2">providerErrorName: {quickDiagnostic.providerErrorName}</span>}
+                  {quickDiagnostic.providerErrorMessage && <span className="sm:col-span-2">providerErrorMessage: {quickDiagnostic.providerErrorMessage}</span>}
+                  {quickDiagnostic.validationErrors?.length ? (
+                    <span className="sm:col-span-2">validationErrors: {quickDiagnostic.validationErrors.join(' | ')}</span>
+                  ) : null}
+                  {quickDiagnostic.normalizedWarnings?.length ? (
+                    <span className="sm:col-span-2">normalizedWarnings: {quickDiagnostic.normalizedWarnings.join(' | ')}</span>
+                  ) : null}
+                  {quickDiagnostic.rejectedAttemptNumber && <span className="sm:col-span-2">rejectedAttemptNumber: {quickDiagnostic.rejectedAttemptNumber}</span>}
+                </div>
+                {quickDiagnostic.rejectedOutputPreview && (
+                  <details className="mt-2 rounded border border-blue-100 bg-blue-50/60 px-2 py-1.5">
+                    <summary className="cursor-pointer font-medium">Rejected LLM output preview</summary>
+                    <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded bg-white p-2 font-mono text-[10px] leading-relaxed text-blue-950">
+                      {quickDiagnostic.rejectedBasisPreview || quickDiagnostic.rejectedOutputPreview}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            )}
+            {(!company.trim() || !roleTitle.trim() || !jdText.trim()) && (
+              <span className="text-xs text-blue-700/80">
+                Requires company, role title, and pasted/fetched JD.
+              </span>
+            )}
+          </div>
+        </div>
+
         <Collapse
           label="Paste DomainIQ JSON"
           hint="Structured export — company profile, tech stack, industry signals"
@@ -495,6 +682,11 @@ function DomainIQSection({
         >
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">DomainIQ JSON export</label>
+            {quickDisplayedSource && (
+              <p className="text-xs font-medium text-gray-600 mb-1">
+                Displayed JSON source: {formatQuickDisplayedSource(quickDisplayedSource)}
+              </p>
+            )}
             <p className="text-xs text-gray-400 mb-2">
               Paste the full JSON object from a DomainIQ export. Fields:{' '}
               <code className="text-gray-500">companyProfile</code>,{' '}
@@ -636,8 +828,12 @@ const EMPTY_REQUIREMENT_MAP: JDRequirementMap = {
 
 export function IntakeForm() {
   const router = useRouter()
-  const [profileMode, setProfileMode] = useState<ProfileMode>('use-saved')
+  const [profile, setProfile] = useState<UserProfile | null | undefined>(undefined)
   const [jdMode, setJDMode] = useState<JDMode>('paste')
+
+  useEffect(() => {
+    getUserProfile().then(p => setProfile(p ?? null))
+  }, [])
 
   const [roleTitle, setRoleTitle] = useState('')
   const [company, setCompany] = useState('')
@@ -654,6 +850,7 @@ export function IntakeForm() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState<null | Awaited<ReturnType<typeof runIntake>>>(null)
+  const [showTrace, setShowTrace] = useState(false)
 
   const stage1Status = deriveStage1Status({
     jdText,
@@ -695,7 +892,9 @@ export function IntakeForm() {
 
     setLoading(true)
     try {
-      const data = await runIntake(jdText, domainIQText, profile, jdSourceType, roleTitle, company)
+      const snapshot = await getActiveSnapshot()
+      const profileEvidenceIndex = snapshot ? buildEvidenceIndex(snapshot) : []
+      const data = await runIntake(jdText, domainIQText, profile, jdSourceType, roleTitle, company, profileEvidenceIndex)
       setResult(data)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Analysis failed.')
@@ -778,7 +977,7 @@ export function IntakeForm() {
 
   return (
     <div className="space-y-8">
-      <ProfileSection mode={profileMode} onMode={setProfileMode} />
+      <ProfileSection profile={profile} />
 
       <div className="border-t border-gray-100 pt-6" />
 
@@ -807,7 +1006,13 @@ export function IntakeForm() {
 
       <div className="border-t border-gray-100 pt-6" />
 
-      <DomainIQSection value={domainIQText} onChange={setDomainIQText} />
+      <DomainIQSection
+        value={domainIQText}
+        onChange={setDomainIQText}
+        company={company}
+        roleTitle={roleTitle}
+        jdText={jdText}
+      />
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
@@ -858,8 +1063,30 @@ export function IntakeForm() {
 
       {result && (
         <div className="mt-8 space-y-8">
-          <IntakeSynthesisView synthesis={result.synthesis} />
-          <JDRequirementMapView map={result.requirementMap} />
+          <div className="flex justify-end">
+            <label className="flex items-center gap-2 text-xs text-gray-400 select-none cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showTrace}
+                onChange={e => setShowTrace(e.target.checked)}
+              />
+              Show evidence trace
+            </label>
+          </div>
+          <IntakeSynthesisView synthesis={result.synthesis} findings={result.fitAnalysis?.findings} showTrace={showTrace} />
+          <JDRequirementMapView map={result.requirementMap} findings={result.fitAnalysis?.findings} showTrace={showTrace} />
+          {showTrace && (
+            <UnmatchedFindingsDebug
+              findings={computeUnmatchedFindings(result.fitAnalysis?.findings, [
+                ...result.requirementMap.required.map(r => r.text),
+                ...result.requirementMap.niceToHave.map(r => r.text),
+                ...(result.requirementMap.needsEvidenceItems ?? result.requirementMap.unsupportedRequirements ?? []),
+                ...result.requirementMap.weaklySupportedRequirements,
+                ...result.synthesis.riskGaps,
+                'company_context',
+              ])}
+            />
+          )}
         </div>
       )}
     </div>
@@ -868,6 +1095,8 @@ export function IntakeForm() {
 
 function IntakeSynthesisView({
   synthesis,
+  findings,
+  showTrace,
 }: {
   synthesis: {
     companySummary: string
@@ -875,16 +1104,25 @@ function IntakeSynthesisView({
     riskGaps: string[]
     emphasisRecommendation: string
   }
+  findings?: import('@/contracts').Stage1Finding[]
+  showTrace: boolean
 }) {
+  const companyContextFinding = showTrace ? findFindingByTopic(findings, 'company_context') : undefined
   return (
     <div className="space-y-5">
       <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Company Context</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Company Context</h3>
+          {showTrace && <TraceChip finding={companyContextFinding} label="Why" />}
+        </div>
         <p className="text-sm text-gray-700">{synthesis.companySummary}</p>
       </div>
       <div>
         <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Fit Hypothesis</h3>
         <p className="text-sm text-gray-700">{synthesis.fitHypothesis}</p>
+        {showTrace && (
+          <p className="text-xs text-gray-400 italic mt-1">No formal trace yet</p>
+        )}
       </div>
       <div>
         <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Emphasis Recommendation</h3>
@@ -897,10 +1135,12 @@ function IntakeSynthesisView({
           <h3 className="text-xs font-semibold uppercase tracking-wide text-amber-600 mb-2">Risk / Gap Areas</h3>
           <ul className="space-y-1">
             {synthesis.riskGaps.map((gap, i) => (
-              <li key={i} className="text-sm text-amber-700 flex gap-2">
-                <span className="shrink-0">·</span>
-                {gap}
-              </li>
+              <TraceableBullet
+                key={i}
+                text={gap}
+                finding={showTrace ? findFindingByTopic(findings, gap) : undefined}
+                className="text-sm text-amber-700"
+              />
             ))}
           </ul>
         </div>
@@ -915,12 +1155,13 @@ async function runIntake(
   profile: unknown,
   jdSourceType: JDSourceType = 'pasted_jd',
   roleTitle?: string,
-  company?: string
+  company?: string,
+  profileEvidenceIndex?: ProfileEvidenceIndexItem[]
 ) {
   const res = await fetch('/api/intake', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jdText, domainIQText, profile, jdSourceType, roleTitle, company }),
+    body: JSON.stringify({ jdText, domainIQText, profile, jdSourceType, roleTitle, company, profileEvidenceIndex }),
   })
   if (!res.ok) {
     const err = await res.json()

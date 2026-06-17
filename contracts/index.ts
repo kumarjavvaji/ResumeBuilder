@@ -23,6 +23,31 @@ export type JDSourceType =
   | 'company_notes'    // from company notes
   | 'inference'        // inferred from company name alone — not JD evidence
 
+export interface JDExtractItem {
+  title: string
+  normalizedText: string
+  sourceQuote?: string
+  sourceBasis?: string
+  priority: 'high' | 'medium' | 'low'
+  confidence: 'high' | 'medium' | 'low'
+}
+
+/**
+ * Compact, hard-capped extraction pass over the raw JD, produced before resume calibration.
+ * Bounds Stage 1 output size and gives Stage 2 a deterministic structure to match profile evidence against.
+ */
+export interface CompactJDExtract {
+  summary: string
+  responsibilities: JDExtractItem[]
+  qualifications: JDExtractItem[]
+  niceToHaves: JDExtractItem[]
+  tools: JDExtractItem[]
+  domainSignals: JDExtractItem[]
+  resumeProofThemes: JDExtractItem[]
+  bridgeQuestionSeeds: JDExtractItem[]
+  risks: JDExtractItem[]
+}
+
 export interface RawJD {
   fullText: string
   summary: string
@@ -30,6 +55,8 @@ export interface RawJD {
   requiredSkills: string[]
   niceToHaves: string[]
   domainSignals: string[]
+  /** Compact structured extraction this RawJD was derived from — reusable for Stage 2 profile matching. */
+  compactExtract?: CompactJDExtract
 }
 
 /**
@@ -45,6 +72,9 @@ export type GapClassification =
   | 'needs_confirmation' // bridge question can clarify coverage
   | 'not_required'       // nice-to-have — deprioritize in bridge questions
 
+/** Calibrated fit classification for a Stage 1 artifact row — synthesized from JD + Quick-DIQ + profile. */
+export type CalibratedFitClassification = 'covered' | 'partial' | 'gap' | 'needs_evidence' | 'weakly_supported'
+
 export interface JDRequirement {
   text: string
   category: 'technical' | 'domain' | 'soft' | 'tool' | 'process'
@@ -57,6 +87,30 @@ export interface JDRequirement {
   sourceExcerpt?: string
   /** Which part of the user profile covers or doesn't cover this requirement. */
   profileEvidence?: string
+  /** @deprecated Superseded by quickDiqGrounding. Kept for existing sessions in storage. */
+  diqCalibration?: string
+  /** What this calibrated reading implies for how the resume should present this requirement. */
+  resumeImplication?: string
+  /** Short label identifying this row, e.g. "SAFe / PI Planning participation". */
+  rowLabel?: string
+  /** Short phrase from the JD requirement or responsibility. */
+  jdSignal?: string
+  /** Short grounding from the normalized Quick-DIQ output — never invented, only drawn from the parsed DIQ object. */
+  quickDiqGrounding?: string
+  /** Short grounding from the saved profile, or a clear statement of profile absence. */
+  profileGrounding?: string
+  /** The synthesis: how JD signal + Quick-DIQ grounding + profile grounding combine into a fit judgment. */
+  calibratedFitInterpretation?: string
+  /** Final calibrated fit classification for this row, synthesized from the triad. */
+  classification?: CalibratedFitClassification
+  /** What the user must confirm or supply if the profile is incomplete. */
+  evidenceNeeded?: string
+  /** What Stage 2 should ask or verify based on this row. */
+  stage2Implication?: string
+  /** ProfileClaim/ProfileSkill/ProfileTool ids deterministically matched to this row's text. */
+  matchedClaimIds?: string[]
+  /** Strength of the matched profile evidence, derived deterministically from matchedClaimIds. */
+  profileEvidenceStrength?: 'strong' | 'moderate' | 'weak' | 'none'
 }
 
 export interface JDRequirementMap {
@@ -79,6 +133,77 @@ export interface DomainIQImport {
   industrySignals: string[]
   techStack: string[]
   cultureSignals: string[]
+}
+
+export type CompanyIndustryPerspective =
+  | 'business_model'
+  | 'operating_priorities'
+  | 'customer_or_user_base'
+  | 'product_or_platform_context'
+  | 'industry_domain_language'
+  | 'stakeholder_landscape'
+  | 'delivery_environment'
+  | 'risk_quality_compliance'
+  | 'data_reporting_analytics'
+  | 'growth_efficiency_or_retention'
+  | 'implementation_or_operations'
+
+export interface CompanyIndustryBasis {
+  targetCompany: string
+  targetRoleTitle: string
+  industry?: string
+  problemSpace: {
+    thesis: string
+    companyProblemHypothesis: string
+    rolePurposeHypothesis: string
+    operatingContext: string[]
+    impliedBusinessPressures: string[]
+    likelyUserOrStakeholderGroups: string[]
+    systemsOrWorkflowContext: string[]
+    confidence: 'high' | 'medium' | 'low'
+    sourceBasis: Array<'jd' | 'user_note' | 'profile_evidence' | 'inference' | 'company_research' | 'industry_research'>
+  }
+  calibrationSummary: string
+  companyPerspectiveNeeds: Array<{
+    perspective: CompanyIndustryPerspective
+    whyItMattersForResume: string
+    resumeImplication: string
+    confidence: 'high' | 'medium' | 'low'
+    sourceBasis: 'jd' | 'user_note' | 'profile_evidence' | 'inference' | 'company_research' | 'industry_research'
+    supportingSignals?: string[]
+  }>
+  resumeCalibrationAngles: Array<{
+    angle: string
+    relevantEvidenceTypes: string[]
+    sectionsAffected: string[]
+    exampleResumeUse: string
+    avoidOverclaiming?: string
+  }>
+  bridgeQuestionRecommendations: Array<{
+    question: string
+    reason: string
+    expectedUse:
+      | 'summary_positioning'
+      | 'skills_keywords'
+      | 'primary_experience_bullet'
+      | 'secondary_experience_bullet'
+      | 'domain_translation'
+      | 'risk_boundary'
+      | 'screening_only'
+    priority: 'must_ask' | 'useful' | 'optional'
+  }>
+  stage3StrategyInputs: {
+    targetPostureHints: string[]
+    proofThemesToPrioritize: string[]
+    domainTermsToUseIfEvidenced: string[]
+    toolsOrMethodsToVerify: string[]
+    risksOrClaimsToAvoid: string[]
+  }
+  evidenceRoutingHints: Array<{
+    evidenceType: string
+    preferredResumeSection: string
+    reason: string
+  }>
 }
 
 export type EmphasisCategory = 'PO' | 'BA' | 'QA' | 'AI' | 'data' | 'operations' | 'blended'
@@ -131,6 +256,47 @@ export interface FitRequirement {
   coverageStatus: JDRequirement['userCoverageStatus']
   gapClassification?: GapClassification
   supportingEvidence: string[]
+  /** @deprecated Superseded by quickDiqGrounding. Kept for existing sessions in storage. */
+  diqCalibration?: string
+  /** What this calibrated reading implies for how the resume should present this requirement. */
+  resumeImplication?: string
+  /** Short label identifying this row, e.g. "SAFe / PI Planning participation". */
+  rowLabel?: string
+  /** Short phrase from the JD requirement or responsibility. */
+  jdSignal?: string
+  /** Short grounding from the normalized Quick-DIQ output — never invented, only drawn from the parsed DIQ object. */
+  quickDiqGrounding?: string
+  /** Short grounding from the saved profile, or a clear statement of profile absence. */
+  profileGrounding?: string
+  /** The synthesis: how JD signal + Quick-DIQ grounding + profile grounding combine into a fit judgment. */
+  calibratedFitInterpretation?: string
+  /** Final calibrated fit classification for this row, synthesized from the triad. */
+  classification?: CalibratedFitClassification
+  /** What the user must confirm or supply if the profile is incomplete. */
+  evidenceNeeded?: string
+  /** What Stage 2 should ask or verify based on this row. */
+  stage2Implication?: string
+  /** ProfileClaim/ProfileSkill/ProfileTool ids deterministically matched to this row's text. */
+  matchedClaimIds?: string[]
+  /** Strength of the matched profile evidence, derived deterministically from matchedClaimIds. */
+  profileEvidenceStrength?: 'strong' | 'moderate' | 'weak' | 'none'
+}
+
+/**
+ * Compact, deterministic distillation of a CompanyIndustryBasis (Quick-DIQ) into the
+ * fields the Stage 1 artifact LLM call needs to calibrate its output. Derived without
+ * an extra LLM call — it's a reshaping of data the user already generated via Quick-DIQ.
+ */
+export interface Stage1CalibrationBrief {
+  companyContext: string
+  domainContext: string
+  roleProblemSpace: string
+  likelyHiringPriorities: string[]
+  operatingModelSignals: string[]
+  stakeholderSignals: string[]
+  deliverySignals: string[]
+  analyticsReportingSignals: string[]
+  resumeCalibrationImplications: string[]
 }
 
 /**
@@ -154,6 +320,63 @@ export interface FitAnalysis {
   /** Requirement texts that should become bridge question targets. */
   recommendedBridgeTargets: string[]
   generatedAt: string
+  /**
+   * Source-cited findings for every claim that may influence Stage 2 bridge questions.
+   * Optional for backward compatibility with sessions analyzed before provenance tracking.
+   */
+  findings?: Stage1Finding[]
+  /** Quick-DIQ company/domain calibration used to generate this artifact, if available. */
+  calibrationBrief?: Stage1CalibrationBrief
+}
+
+// ─────────────────────────────────────────────
+// Stage 1 Finding Provenance — claim-level source citation
+// ─────────────────────────────────────────────
+
+/** Where a single Stage 1 claim/finding originated. Source the claim atom, not the artifact. */
+export type Stage1SourceType =
+  | 'jd_company_description'
+  | 'jd_department_overview'
+  | 'jd_duties'
+  | 'jd_qualifications'
+  | 'profile_evidence'
+  | 'profile_absence'
+  | 'diq_context'
+  | 'quickstart_company_context'
+  | 'calibration_ref'
+  | 'inference'
+
+export type Stage1SourceUsage =
+  | 'role_requirement'
+  | 'candidate_evidence'
+  | 'candidate_gap'
+  | 'context_for_positioning'
+  | 'synthesis_only'
+  | 'inference_boundary'
+
+export interface Stage1SourceTrace {
+  sourceType: Stage1SourceType
+  sourceLabel: string
+  supportingText: string
+  /** True only for the ground-truth source of this claim (JD text, profile evidence, or profile absence). DIQ/QuickStart/inference are never primary. */
+  primary: boolean
+  usage: Stage1SourceUsage
+}
+
+export type Stage1DownstreamPermission =
+  | 'can_support_resume_claim'
+  | 'needs_user_evidence'
+  | 'gap_to_bridge'
+  | 'context_only_do_not_claim'
+  | 'inference_only'
+
+export interface Stage1Finding {
+  id: string
+  topic: string
+  findingText: string
+  coverageStatus?: 'covered' | 'partial' | 'gap' | 'needs_evidence' | 'weakly_supported' | 'context_only'
+  sourceTrace: Stage1SourceTrace[]
+  downstreamPermission: Stage1DownstreamPermission
 }
 
 /** Per-session audit of how completely Stage 1→5 data is populated. */
@@ -606,6 +829,15 @@ export type Stage4RawResumeStatus =
   | 'accepted'
   | 'stale'
 
+/** A single section's Stage 4 refinement state — instruction, LLM output, acceptance. */
+export interface Stage4SectionRefinement {
+  instruction: string
+  /** The LLM-revised section text. Not yet in use until accepted. */
+  output: string
+  accepted: boolean
+  generatedAt: string
+}
+
 export type Stage4StructureSource = 'uploaded_resume' | 'manual_profile' | 'default'
 
 export interface Stage4SourceArtifactSnapshot {
@@ -646,6 +878,421 @@ export interface Stage4RawResumeText {
   sections: Stage4RawResumeSections
   warnings: string[]
   staleReasons: string[]
+  /** Full-resume LLM refinement — single instruction applied to the entire resume. */
+  refinementInstruction?: string
+  /** LLM output for the full-resume refinement (pending or accepted). */
+  refinementOutput?: string
+  /** True after the user accepts the full-resume refinement. */
+  refinementAccepted?: boolean
+  /** When the full-resume refinement was produced. */
+  refinementRefinedAt?: string
+  /**
+   * Per-section LLM refinements. Keys are section identifiers:
+   * 'summary' | 'skills' | 'experience-po' | 'experience-ba' | 'experience-qa' | 'education'
+   */
+  sectionRefinements?: Record<string, Stage4SectionRefinement>
+  /** Deterministic generation contract derived from session + profile at assembly time. */
+  contract?: ResumeGenerationContract
+  /** Pre-generation readiness contract produced by Stage 3 validation gate. */
+  readinessContract?: ResumeReadinessContract
+  /** Compact ruleset + Blueprint strategy brief used by Stage 4 generation/review. */
+  strategyBrief?: ResumeStrategyBrief
+  /** Quality trace built at assembly time showing which guidance components were active. */
+  qualityTrace?: Stage4QualityTrace
+}
+
+// ─────────────────────────────────────────────
+// Resume Generation Contract — deterministic assembly rules
+// ─────────────────────────────────────────────
+
+export type Stage4RoleFamily =
+  | 'product_owner'
+  | 'associate_pm'
+  | 'product_analyst'
+  | 'business_analyst'
+  | 'qa'
+  | 'other'
+
+export interface Stage4SectionPlan {
+  summary: { maxLines: number }
+  skills: { maxRows: number }
+  productOwner: { minBullets: number; maxBullets: number }
+  productAnalyst: { minBullets: number; maxBullets: number }
+  qa: { minBullets: number; maxBullets: number }
+  education: { maxLines: number }
+}
+
+export interface Stage4SessionDirection {
+  representPOFrom2021: boolean
+  avoidFormalTitleHedging: boolean
+  targetPosture: string
+  roadmapBoundary: string
+  azureDevOpsAllowed: boolean
+  travelResumeAllowed: boolean
+  salesforcePreferredPhrase: string
+}
+
+export interface ResumeGenerationContract {
+  targetRoleFamily: Stage4RoleFamily
+  targetPosture: string
+  sectionPlan: Stage4SectionPlan
+  sessionDirection: Stage4SessionDirection
+  bannedPhrases: string[]
+  preferredReplacements: Record<string, string>
+  evidenceRouting: Record<string, string[]>
+  requiredBulletThemes: string[]
+}
+
+export interface ContractViolation {
+  rule: string
+  section: string
+  detail: string
+  canAutoRepair: boolean
+  /** 'error' = blocks export / must repair; 'warning' = advisory, user can dismiss */
+  severity: 'error' | 'warning'
+}
+
+export interface ContractValidationResult {
+  pass: boolean
+  violations: ContractViolation[]
+  suggestedRepairs: string[]
+}
+
+// Resume strategy ruleset and compact session brief
+
+export interface ResumeWritingRuleset {
+  sourceBasis: Array<{
+    sourceId: string
+    sourceName: string
+    ruleIds: string[]
+  }>
+  sourceBackedRules: Array<{
+    id: string
+    sourceId: string
+    category:
+      | 'summaryPurpose'
+      | 'skillsPurpose'
+      | 'bulletConstruction'
+      | 'jdAlignment'
+      | 'productOwnerAgileScrumProof'
+      | 'executivePresence'
+      | 'antiPattern'
+      | 'rewritePreference'
+    text: string
+    appliesToRoleFamilies: string[]
+  }>
+  sectionPurposeGuidance: {
+    summary: string
+    skills: string
+    experience: string
+    education: string
+  }
+  bulletConstructionRules: string[]
+  metricUseRules: string[]
+  jdAlignmentRules: string[]
+  productOwnerAgileScrumProofRules: string[]
+  executivePresenceRules: string[]
+  antiPatternsToAvoid: string[]
+  rewritePreferences: string[]
+}
+
+export interface ResumeStrategyBrief {
+  sourceBasis: Array<{
+    sourceId: string
+    sourceName: string
+    ruleIds: string[]
+  }>
+  activeRuleIds: string[]
+  targetRoleStrategy: string
+  sectionPurpose: {
+    summary: string
+    skills: string
+    experience: string
+    education: string
+  }
+  jdCriticalThemes: Array<{
+    theme: string
+    mustAppearIn: string[]
+    evidenceRequired: boolean
+  }>
+  bulletConstructionRules: string[]
+  metricUseRules: string[]
+  executivePresenceRules: string[]
+  antiPatternsToAvoid: string[]
+  rewritePreferences: string[]
+}
+
+// ─────────────────────────────────────────────
+// Critical Resume Review (Stage 4 editorial gate)
+// ─────────────────────────────────────────────
+
+export type CriticalResumeArtifactStatus =
+  | 'ready'
+  | 'needs_targeted_rewrite'
+  | 'needs_regeneration'
+  | 'blocked_by_missing_evidence'
+
+export type CriticalResumeSectionPurpose =
+  | 'positioning'
+  | 'ats_support'
+  | 'proof'
+  | 'credentials'
+
+export type CriticalResumeIssueType =
+  | 'summary_recap_instead_of_positioning'
+  | 'summary_duplicates_proof'
+  | 'skills_overloaded'
+  | 'skills_carry_fit_without_experience_proof'
+  | 'jd_theme_missing_from_proof'
+  | 'volume_led_bullet'
+  | 'task_led_bullet'
+  | 'process_led_bullet'
+  | 'hollow_bullet'
+  | 'weak_metric_framing'
+  | 'impact_gap'
+  | 'judgment_gap'
+  | 'authority_boundary_violation'
+  | 'overclaiming'
+  | 'underclaiming'
+  | 'evidence_misrouting'
+  | 'unsupported_claim'
+  | 'unsupported_tool'
+  | 'weak_executive_presence'
+  | 'poor_section_ordering'
+  | 'credential_incomplete'
+
+export interface SectionFinding {
+  sectionKey: string
+  sectionPurpose: CriticalResumeSectionPurpose
+  status: CriticalResumeArtifactStatus
+  findings: Array<{
+    issueType: CriticalResumeIssueType
+    severity: 'must_fix' | 'should_fix' | 'note'
+    excerpt: string
+    whyItFails: string
+    desiredStrategy: string
+    rewriteHint: string
+    allowedEvidenceIds: string[]
+  }>
+}
+
+export interface RewriteDirective {
+  directiveId: string
+  targetSection: string
+  targetScope: 'section' | 'bullet' | 'phrase' | 'ordering'
+  action:
+    | 'rewrite'
+    | 'replace'
+    | 'remove'
+    | 'reorder'
+    | 'expand'
+    | 'compress'
+    | 'move'
+    | 'convert_volume_to_impact'
+    | 'convert_task_to_judgment'
+    | 'add_jd_proof'
+    | 'clarify_authority_boundary'
+    | 'complete_credential'
+  sourceIssueType: string
+  instruction: string
+  allowedEvidenceIds: string[]
+  mustPreserve: string[]
+  mustAvoid: string[]
+  successCriteria: string[]
+}
+
+export interface CriticalResumeReview {
+  artifactStatus: CriticalResumeArtifactStatus
+  reviewSummary: {
+    decision: string
+    primaryReason: string
+    noRewriteNeededReason?: string
+  }
+  sectionFindings: SectionFinding[]
+  rewriteDirectives: RewriteDirective[]
+  blockedQuestions: Array<{
+    missingEvidence: string
+    whyNeeded: string
+    sectionAffected: string
+  }>
+}
+
+// ─────────────────────────────────────────────
+// Stage 4 Quality Trace
+// ─────────────────────────────────────────────
+
+export interface Stage4RulesetTrace {
+  rulesetLoaded: boolean
+  activeRuleIds: string[]
+  antiPatternIds: string[]
+  rewriteStrategyIds: string[]
+}
+
+export interface Stage4StrategyBriefTrace {
+  built: boolean
+  targetRoleStrategy?: string
+  jdCriticalThemes: string[]
+  bulletConstructionRules: string[]
+  metricUseRules: string[]
+  executivePresenceRules: string[]
+  antiPatternsToAvoid: string[]
+}
+
+export interface Stage4BlueprintTrace {
+  built: boolean
+  sectionKeys: string[]
+  primaryProofSections: string[]
+  secondaryProofSections: string[]
+  supportingSections: string[]
+  bulletIntentCount: number
+  evidenceRoutingCount: number
+}
+
+export interface Stage4GenerationTrace {
+  promptIncludesStrategyBrief: boolean
+  promptIncludesBlueprint: boolean
+  promptIncludesEvidenceMap: boolean
+  promptIncludesUserDirection: boolean
+  promptIncludesBannedPhrases: boolean
+  modelCallCompleted: boolean
+}
+
+export interface Stage4ValidationTrace {
+  ranDeterministicValidation: boolean
+  violationCount: number
+  violationRules: string[]
+}
+
+export interface Stage4ReviewTrace {
+  ranCriticalReview: boolean
+  artifactStatus?: string
+  findingTypes: string[]
+  rewriteDirectiveCount: number
+  /** Full directives from critical review — passed to repair as primary repair specification. */
+  rewriteDirectives?: RewriteDirective[]
+}
+
+export interface Stage4RepairTrace {
+  repairAttempted: boolean
+  deterministicRepairApplied: boolean
+  llmRepairApplied: boolean
+  finalValidationPassed: boolean
+}
+
+export interface Stage4QualityTrace {
+  sessionId: string
+  generatedAt: string
+  rulesetTrace: Stage4RulesetTrace
+  strategyBriefTrace: Stage4StrategyBriefTrace
+  blueprintTrace: Stage4BlueprintTrace
+  generationTrace: Stage4GenerationTrace
+  validationTrace: Stage4ValidationTrace
+  reviewTrace: Stage4ReviewTrace
+  repairTrace: Stage4RepairTrace
+}
+
+// ─────────────────────────────────────────────
+// Evidence Atoms (Stage 1 classifier output)
+// ─────────────────────────────────────────────
+
+export type EvidenceAtomType =
+  | 'title' | 'role' | 'responsibility' | 'metric' | 'tool'
+  | 'certification' | 'education' | 'domain' | 'method' | 'outcome'
+
+export type EvidenceAllowedUse =
+  | 'summary' | 'skills' | 'po_bullet' | 'pa_bullet' | 'qa_bullet'
+  | 'education' | 'cover_letter' | 'screening_only' | 'exclude'
+
+export type EvidenceAtomWarning =
+  | 'unsupported' | 'vague' | 'stale' | 'duplicate' | 'conflicting'
+  | 'too_volume_led' | 'not_resume_worthy'
+
+export type MetricClass = 'impact' | 'volume' | 'process' | 'unclassified'
+
+export interface EvidenceAtom {
+  id: string
+  text: string
+  atomType: EvidenceAtomType
+  sourceSection: 'work_history' | 'education' | 'certification' | 'skill' | 'bridge_answer'
+  sourceEntryId?: string
+  confidence: 'high' | 'medium' | 'low'
+  allowedUses: EvidenceAllowedUse[]
+  isImpactEvidence: boolean
+  isVolumeEvidence: boolean
+  metricClass?: MetricClass
+  isCandidateSpecificFact: boolean
+  warnings: EvidenceAtomWarning[]
+}
+
+// ─────────────────────────────────────────────
+// Resolved Bridge Decisions (Stage 2)
+// ─────────────────────────────────────────────
+
+export type BridgeDispositionType =
+  | 'use_directly'
+  | 'use_after_rewrite'
+  | 'use_as_constraint'
+  | 'screening_only'
+  | 'needs_clarification'
+  | 'do_not_use'
+
+export interface ResolvedBridgeDecision {
+  questionId: string
+  questionText: string
+  userAnswer: string
+  dispositionType: BridgeDispositionType
+  normalizedStatement: string
+  clearsWarnings: string[]
+  constraint?: string
+  screeningNote?: string
+  routeToResume: boolean
+}
+
+// ─────────────────────────────────────────────
+// Resume Readiness Contract (Stage 3 gate)
+// ─────────────────────────────────────────────
+
+export interface MetricPolicy {
+  preferImpactOverVolume: boolean
+  volumeMetricsRequireImpactTie: boolean
+}
+
+export interface SummaryPolicy {
+  noProofLevelDuplication: boolean
+  noTeamSizeIfInExperience: boolean
+  noCadenceIfInExperience: boolean
+  noMetricsIfInExperience: boolean
+  noToolDetailsIfInExperience: boolean
+}
+
+export interface ResumeReadinessSectionPlan {
+  summary: { purpose: 'positioning'; maxSentences: number; maxApproxLines: number }
+  skills: { purpose: 'ats_support'; maxRows: number }
+  primaryExperience: { minBullets: number; maxBullets: number }
+  secondaryExperience: { minBullets: number; maxBullets: number }
+  earlierExperience: { maxBullets: number }
+  education: { maxLines: number }
+}
+
+export interface ResumeReadinessContract {
+  targetRoleFamily: string
+  targetPosture: string
+  sectionPlan: ResumeReadinessSectionPlan
+  evidenceRouting: Record<string, string[]>
+  resolvedDecisions: Record<string, unknown>
+  bannedPhrases: string[]
+  preferredReplacements: Record<string, string>
+  allowedTools: string[]
+  disallowedTools: string[]
+  requiredExperienceThemes: string[]
+  metricPolicy: MetricPolicy
+  summaryPolicy: SummaryPolicy
+}
+
+export interface ReadinessCheckResult {
+  ready: boolean
+  warnings: string[]
+  blockers: string[]
 }
 
 // ─────────────────────────────────────────────
@@ -797,6 +1444,7 @@ export type ProfileSourceType =
   | 'refinement_instruction'
   | 'learning_signal'
   | 'prior_session'
+  | 'bridge_answer'
 
 export interface ProfileSource {
   sourceId: string
@@ -807,6 +1455,11 @@ export interface ProfileSource {
   /** SHA-256 hex digest of uploaded file content. Used to detect duplicate uploads. */
   contentHash?: string
   extractedAt: string
+  /** bridge_answer sources only */
+  bridgeQuestionId?: string
+  questionText?: string
+  questionType?: string
+  answerSnippet?: string
 }
 
 export type ClaimCategory =
@@ -987,6 +1640,21 @@ export interface ProfileDelta {
   unresolvedConflicts: ProfileConflict[]
   profileVersionBefore: number
   profileVersionAfter: number
+}
+
+/**
+ * Compact, transient evidence item used to ground Stage 1 JD parsing.
+ * Not persisted — built fresh per-request from the active ProfileSnapshot
+ * (claims/skills/tools), sent to the intake API, and matched deterministically
+ * against parsed JD requirements. Distinct from ProfileProjection, which is
+ * section-targeted for Stage 3 artifact generation.
+ */
+export interface ProfileEvidenceIndexItem {
+  claimId: string
+  normalizedKey: string
+  text: string
+  category: ClaimCategory | 'skill' | 'tool'
+  evidenceStrength: 'strong' | 'medium' | 'weak'
 }
 
 /**

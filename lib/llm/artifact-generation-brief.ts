@@ -296,15 +296,25 @@ function deriveArtifactStrategy(
           ? 'Establish Product Analyst positioning in 3–4 lines. Lead with analytics depth and data-to-decision capability. End with what the candidate brings to this specific analytics function.'
           : 'Establish candidate positioning in 3–4 lines. Lead with the primary function and domain strength. End with what they bring to this specific role.',
         sectionPriority: 'primary',
-        lineBudget: '3–4 lines maximum',
+        lineBudget: '3–4 lines MAXIMUM — positioning statement only, not a career history dump',
         emphasis: isAnalytics
           ? ['product analytics and data-backed decisions', 'KPI definition and metrics ownership', 'SQL/data validation', 'cross-functional reporting and stakeholder recommendations', 'opportunity sizing']
           : ['primary role function', 'domain strength', 'core JD-aligned capability'],
         deemphasis: isAnalytics
           ? ['generic PO language', 'roadmap authority without analytics substance', 'company-research terms that sound like DomainIQ output']
-          : ['puff language', 'generic openers'],
+          : ['puff language', 'generic openers', 'career history narration', 'older employers irrelevant to this JD'],
         mustInclude: coveredJDTerms.slice(0, 3),
-        mustAvoid: ['results-driven', 'dynamic', 'passionate', 'thought leader', 'synergize', 'leverage', ...unsupportedGaps.slice(0, 3)],
+        mustAvoid: [
+          'results-driven', 'dynamic', 'passionate', 'thought leader', 'synergize', 'leverage',
+          '"formal PO tenure"',
+          '"early career includes"',
+          '"grounding operational context"',
+          '"grounding data pipeline context"',
+          'GAINSystems (exclude unless JD requires supply chain/CPG/operations domain)',
+          '"With a decade of..."',
+          '"Background includes..."',
+          ...unsupportedGaps.slice(0, 3),
+        ],
       }
     }
 
@@ -359,7 +369,12 @@ function deriveArtifactStrategy(
           .filter(e => /analyst|ba\b|business/i.test(e.title))
           .flatMap(e => e.approvedMetrics)
           .slice(0, 3),
-        mustAvoid: unsupportedGaps.slice(0, 3),
+        mustAvoid: [
+          ...unsupportedGaps.slice(0, 3),
+          '"Led all Scrum ceremonies" (use "Supported backlog refinement, sprint demos, and ceremony preparation..." instead)',
+          '"Owned product roadmap" (PA does not own the roadmap)',
+          '"Managed sprint delivery" (that is PO/PM framing)',
+        ],
       }
     }
 

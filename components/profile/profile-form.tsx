@@ -52,7 +52,21 @@ export function ProfileForm() {
     getUserProfile().then(p => {
       if (p) {
         const { id, updatedAt, ...rest } = p
-        setProfile(rest)
+        setProfile({
+          ...EMPTY_PROFILE,
+          ...rest,
+          workHistory: (rest.workHistory ?? []).map(w => ({
+            bullets: [],
+            approvedMetrics: [],
+            skills: [],
+            domain: '',
+            ...w,
+          })),
+          education:      rest.education      ?? EMPTY_PROFILE.education,
+          certifications: rest.certifications ?? EMPTY_PROFILE.certifications,
+          constraints:    rest.constraints    ?? EMPTY_PROFILE.constraints,
+          rejectedPhrases: rest.rejectedPhrases ?? EMPTY_PROFILE.rejectedPhrases,
+        })
       }
       setLoading(false)
     })

@@ -32,6 +32,7 @@ import {
 } from './artifact-generation-brief'
 import { buildQualifiedEvidenceCards } from './qualified-evidence-cards'
 import { runClaimFidelityCheck } from './claim-fidelity-check'
+import { buildSectionQualityGate } from './generation-quality-gate'
 
 export interface GenerateOptions {
   sessionId: string
@@ -239,6 +240,7 @@ function buildSystemPrompt(
   calibrationSummary?: CalibrationSummary,
   brief?: import('./artifact-generation-brief').ArtifactGenerationBrief
 ): string {
+  // Quality gate appended at the end — LLM reads this last before generating
   const rejectedBlock = rejectedPhrases.length
     ? `\nNEVER use these phrases (user-rejected): ${rejectedPhrases.map(p => `"${p}"`).join(', ')}`
     : ''
@@ -268,11 +270,11 @@ function buildSystemPrompt(
     : ''
 
   const typeInstructions: Record<SectionType, string> = {
-    summary: `Write a 3–4 sentence professional summary. Lead with the candidate's function and domain strength. End with what they bring to this specific role. No generic opener. No puff language.`,
-    skills: `Output grouped skill lines using the candidate's skillGroups. Format each group as: HeadingWord: Skill One, Skill Two, Skill Three. One group per line. Single-word ATS headings only (e.g. Analysis, Product, Delivery, Data, Testing, Security, Tools). No star ratings. No generic soft skills. Do not invent skills not in the profile.`,
-    'experience-po': `Write 3–5 impact-first bullets for a Product Owner role. Emphasize: backlog ownership, sprint delivery, stakeholder alignment, roadmap decisions, delivery outcomes. Each bullet must cite a real work entry.`,
-    'experience-ba': `Write 3–5 impact-first bullets for a Business Analyst role. Emphasize: gap analysis, requirements documentation, acceptance criteria, workflow mapping, UAT, release readiness, risk, decision clarity.`,
-    'experience-qa': `Write 3–5 impact-first bullets for a QA/Lead Quality role. Emphasize: test automation, quality frameworks, SpecFlow, defect reduction, release readiness.`,
+    summary: 'Write a compact 3-4 line professional summary. Keep it positioning-level; Experience bullets carry proof details, metrics, tools, cadence, and team sizes. No generic opener or puff language.',
+    skills: 'Output compact grouped skill rows from the candidate skillGroups. Format each row as Heading: Skill One, Skill Two. No star ratings, generic soft skills, unsupported tools, or invented skills.',
+    'experience-po': 'Write 3-5 impact-first Product Owner bullets grounded in real work evidence. Emphasize backlog ownership, sprint delivery, stakeholder alignment, prioritization, and outcomes.',
+    'experience-ba': 'Write 3-5 impact-first Product Analyst or Business Analyst bullets grounded in real work evidence. Emphasize requirements, gap analysis, acceptance criteria, UAT, documentation, and release readiness.',
+    'experience-qa': 'Write 3-5 impact-first QA or quality bullets grounded in real work evidence. For product roles, keep QA supportive rather than dominant.',
     'cover-letter': `Write a cover letter that does NOT recap the resume. Explain why this specific role at this company fits the candidate's career direction. Use the company context and fit hypothesis to ground the argument. 3 short paragraphs max.`,
     'referral-message': `Write a short, direct LinkedIn message to a potential referrer. 4–5 sentences. Personal, specific, no fluff.`,
     'recruiter-message': `Write a recruiter outreach message. 3–4 sentences. State the role, the fit, and ask for a conversation.`,
@@ -285,6 +287,8 @@ function buildSystemPrompt(
     : ''
 
   const briefBlock = brief ? serializeBriefForPrompt(brief) : ''
+
+  const qualityGate = buildSectionQualityGate(type)
 
   return `${briefBlock}You generate targeted resume artifacts for a specific job application.
 
@@ -318,7 +322,8 @@ Evidence rules:
 ${rejectedBlock}
 ${constraintsBlock}
 ${personalBlock}
-${globalBlock}`
+${globalBlock}
+${qualityGate}`
 }
 
 // Calibration context injected as market-pattern guidance only.
