@@ -1,5 +1,5 @@
 import { anthropic, MODEL } from './client'
-import type { JDRequirementMap, DomainIQImport, EmphasisCategory, UserProfile } from '@/contracts'
+import type { JDRequirementMap, DomainIQImport, EmphasisCategory, UserProfile, Stage1CalibrationBrief } from '@/contracts'
 
 export interface IntakeSynthesis {
   companySummary: string
@@ -13,7 +13,8 @@ export interface IntakeSynthesis {
 export async function generateIntakeSynthesis(
   jdMap: JDRequirementMap,
   domainIQ: DomainIQImport,
-  profile: UserProfile
+  profile: UserProfile,
+  calibrationBrief?: Stage1CalibrationBrief
 ): Promise<IntakeSynthesis> {
   const response = await anthropic.messages.create({
     model: MODEL,
@@ -55,12 +56,13 @@ Rules:
 - companySummary: 2-3 sentences. What this company does and why it matters for the candidate's narrative.
 - fitHypothesis: 2-3 sentences. Where the candidate's background fits strongest and what the headline story is.
 - evaluatorLens: 1-2 sentences. Who will evaluate this resume (e.g. "An engineering manager who cares about delivery cadence and hands-on backlog ownership") and what they prioritize above all else. Be specific — not generic recruiter language.
-- riskGaps: specific gaps, not generic. Each gap should name the missing thing precisely.
+- riskGaps: specific gaps, not generic. Each gap should name the missing thing precisely. When a calibrationBrief is provided, explain *why* a gap matters in this company/domain context, not just that it's missing — e.g. not "no SQL experience listed" but "no SQL/reporting evidence, which matters here because this team owns its own analytics rather than handing it to a BI team."
 - emphasisRecommendation: pick based on the real job function, not the posted title.
-- Do not use phrases like "sits at the intersection of."`,
+- Do not use phrases like "sits at the intersection of."
+- When a calibrationBrief is provided, let it shape companySummary and fitHypothesis too — they should read as calibrated to this specific company/domain, not generic. Never use the calibrationBrief to assert a candidate skill or claim that isn't backed by jdMap/profile evidence.`,
     messages: [{
       role: 'user',
-      content: JSON.stringify({ jdMap, domainIQ, profileSummary: profileToSummary(profile) })
+      content: JSON.stringify({ jdMap, domainIQ, calibrationBrief, profileSummary: profileToSummary(profile) })
     }]
   })
 

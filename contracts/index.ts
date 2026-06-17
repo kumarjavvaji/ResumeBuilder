@@ -23,6 +23,31 @@ export type JDSourceType =
   | 'company_notes'    // from company notes
   | 'inference'        // inferred from company name alone — not JD evidence
 
+export interface JDExtractItem {
+  title: string
+  normalizedText: string
+  sourceQuote?: string
+  sourceBasis?: string
+  priority: 'high' | 'medium' | 'low'
+  confidence: 'high' | 'medium' | 'low'
+}
+
+/**
+ * Compact, hard-capped extraction pass over the raw JD, produced before resume calibration.
+ * Bounds Stage 1 output size and gives Stage 2 a deterministic structure to match profile evidence against.
+ */
+export interface CompactJDExtract {
+  summary: string
+  responsibilities: JDExtractItem[]
+  qualifications: JDExtractItem[]
+  niceToHaves: JDExtractItem[]
+  tools: JDExtractItem[]
+  domainSignals: JDExtractItem[]
+  resumeProofThemes: JDExtractItem[]
+  bridgeQuestionSeeds: JDExtractItem[]
+  risks: JDExtractItem[]
+}
+
 export interface RawJD {
   fullText: string
   summary: string
@@ -30,6 +55,8 @@ export interface RawJD {
   requiredSkills: string[]
   niceToHaves: string[]
   domainSignals: string[]
+  /** Compact structured extraction this RawJD was derived from — reusable for Stage 2 profile matching. */
+  compactExtract?: CompactJDExtract
 }
 
 /**
@@ -45,6 +72,9 @@ export type GapClassification =
   | 'needs_confirmation' // bridge question can clarify coverage
   | 'not_required'       // nice-to-have — deprioritize in bridge questions
 
+/** Calibrated fit classification for a Stage 1 artifact row — synthesized from JD + Quick-DIQ + profile. */
+export type CalibratedFitClassification = 'covered' | 'partial' | 'gap' | 'needs_evidence' | 'weakly_supported'
+
 export interface JDRequirement {
   text: string
   category: 'technical' | 'domain' | 'soft' | 'tool' | 'process'
@@ -57,6 +87,30 @@ export interface JDRequirement {
   sourceExcerpt?: string
   /** Which part of the user profile covers or doesn't cover this requirement. */
   profileEvidence?: string
+  /** @deprecated Superseded by quickDiqGrounding. Kept for existing sessions in storage. */
+  diqCalibration?: string
+  /** What this calibrated reading implies for how the resume should present this requirement. */
+  resumeImplication?: string
+  /** Short label identifying this row, e.g. "SAFe / PI Planning participation". */
+  rowLabel?: string
+  /** Short phrase from the JD requirement or responsibility. */
+  jdSignal?: string
+  /** Short grounding from the normalized Quick-DIQ output — never invented, only drawn from the parsed DIQ object. */
+  quickDiqGrounding?: string
+  /** Short grounding from the saved profile, or a clear statement of profile absence. */
+  profileGrounding?: string
+  /** The synthesis: how JD signal + Quick-DIQ grounding + profile grounding combine into a fit judgment. */
+  calibratedFitInterpretation?: string
+  /** Final calibrated fit classification for this row, synthesized from the triad. */
+  classification?: CalibratedFitClassification
+  /** What the user must confirm or supply if the profile is incomplete. */
+  evidenceNeeded?: string
+  /** What Stage 2 should ask or verify based on this row. */
+  stage2Implication?: string
+  /** ProfileClaim/ProfileSkill/ProfileTool ids deterministically matched to this row's text. */
+  matchedClaimIds?: string[]
+  /** Strength of the matched profile evidence, derived deterministically from matchedClaimIds. */
+  profileEvidenceStrength?: 'strong' | 'moderate' | 'weak' | 'none'
 }
 
 export interface JDRequirementMap {
@@ -202,6 +256,47 @@ export interface FitRequirement {
   coverageStatus: JDRequirement['userCoverageStatus']
   gapClassification?: GapClassification
   supportingEvidence: string[]
+  /** @deprecated Superseded by quickDiqGrounding. Kept for existing sessions in storage. */
+  diqCalibration?: string
+  /** What this calibrated reading implies for how the resume should present this requirement. */
+  resumeImplication?: string
+  /** Short label identifying this row, e.g. "SAFe / PI Planning participation". */
+  rowLabel?: string
+  /** Short phrase from the JD requirement or responsibility. */
+  jdSignal?: string
+  /** Short grounding from the normalized Quick-DIQ output — never invented, only drawn from the parsed DIQ object. */
+  quickDiqGrounding?: string
+  /** Short grounding from the saved profile, or a clear statement of profile absence. */
+  profileGrounding?: string
+  /** The synthesis: how JD signal + Quick-DIQ grounding + profile grounding combine into a fit judgment. */
+  calibratedFitInterpretation?: string
+  /** Final calibrated fit classification for this row, synthesized from the triad. */
+  classification?: CalibratedFitClassification
+  /** What the user must confirm or supply if the profile is incomplete. */
+  evidenceNeeded?: string
+  /** What Stage 2 should ask or verify based on this row. */
+  stage2Implication?: string
+  /** ProfileClaim/ProfileSkill/ProfileTool ids deterministically matched to this row's text. */
+  matchedClaimIds?: string[]
+  /** Strength of the matched profile evidence, derived deterministically from matchedClaimIds. */
+  profileEvidenceStrength?: 'strong' | 'moderate' | 'weak' | 'none'
+}
+
+/**
+ * Compact, deterministic distillation of a CompanyIndustryBasis (Quick-DIQ) into the
+ * fields the Stage 1 artifact LLM call needs to calibrate its output. Derived without
+ * an extra LLM call — it's a reshaping of data the user already generated via Quick-DIQ.
+ */
+export interface Stage1CalibrationBrief {
+  companyContext: string
+  domainContext: string
+  roleProblemSpace: string
+  likelyHiringPriorities: string[]
+  operatingModelSignals: string[]
+  stakeholderSignals: string[]
+  deliverySignals: string[]
+  analyticsReportingSignals: string[]
+  resumeCalibrationImplications: string[]
 }
 
 /**
@@ -230,6 +325,8 @@ export interface FitAnalysis {
    * Optional for backward compatibility with sessions analyzed before provenance tracking.
    */
   findings?: Stage1Finding[]
+  /** Quick-DIQ company/domain calibration used to generate this artifact, if available. */
+  calibrationBrief?: Stage1CalibrationBrief
 }
 
 // ─────────────────────────────────────────────
@@ -1347,6 +1444,7 @@ export type ProfileSourceType =
   | 'refinement_instruction'
   | 'learning_signal'
   | 'prior_session'
+  | 'bridge_answer'
 
 export interface ProfileSource {
   sourceId: string
@@ -1357,6 +1455,11 @@ export interface ProfileSource {
   /** SHA-256 hex digest of uploaded file content. Used to detect duplicate uploads. */
   contentHash?: string
   extractedAt: string
+  /** bridge_answer sources only */
+  bridgeQuestionId?: string
+  questionText?: string
+  questionType?: string
+  answerSnippet?: string
 }
 
 export type ClaimCategory =
@@ -1537,6 +1640,21 @@ export interface ProfileDelta {
   unresolvedConflicts: ProfileConflict[]
   profileVersionBefore: number
   profileVersionAfter: number
+}
+
+/**
+ * Compact, transient evidence item used to ground Stage 1 JD parsing.
+ * Not persisted — built fresh per-request from the active ProfileSnapshot
+ * (claims/skills/tools), sent to the intake API, and matched deterministically
+ * against parsed JD requirements. Distinct from ProfileProjection, which is
+ * section-targeted for Stage 3 artifact generation.
+ */
+export interface ProfileEvidenceIndexItem {
+  claimId: string
+  normalizedKey: string
+  text: string
+  category: ClaimCategory | 'skill' | 'tool'
+  evidenceStrength: 'strong' | 'medium' | 'weak'
 }
 
 /**

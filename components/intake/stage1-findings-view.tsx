@@ -1,74 +1,31 @@
 'use client'
+import { useState } from 'react'
 import type { Stage1Finding } from '@/contracts'
 import { Badge } from '@/components/shared/badge'
 
-/**
- * Renders the formal, source-cited Stage 1 findings (fitAnalysis.findings).
- * Only renders what is present on each finding — no inferred or synthesized citations.
- */
-export function Stage1FindingsView({ findings }: { findings?: Stage1Finding[] }) {
-  if (!findings || findings.length === 0) {
-    return (
-      <div className="border border-dashed border-gray-300 rounded-lg p-4">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
-          Source-backed Findings
-        </h3>
-        <p className="text-xs text-gray-400">
-          No formal findings on this session. Either it was analyzed before provenance tracking
-          existed, or no findings were derived for this artifact.
-        </p>
-      </div>
-    )
-  }
-
-  return (
-    <div>
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
-        Source-backed Findings
-      </h3>
-      <p className="text-xs text-gray-400 mb-3">
-        Claim-level provenance for findings that may influence Stage 2 questions. Sections not
-        listed here have no formal source trace yet.
-      </p>
-      <div className="space-y-3">
-        {findings.map(finding => (
-          <Stage1FindingCard key={finding.id} finding={finding} />
-        ))}
-      </div>
-    </div>
-  )
+function normalize(s: string): string {
+  return s.trim().toLowerCase()
 }
 
-function Stage1FindingCard({ finding }: { finding: Stage1Finding }) {
-  return (
-    <div className="border border-gray-200 rounded-lg p-3">
-      <div className="flex items-start justify-between gap-2 mb-1">
-        <span className="text-xs font-medium text-gray-500">{finding.topic}</span>
-        <div className="flex gap-1 shrink-0">
-          {finding.coverageStatus && (
-            <Badge variant={coverageVariant(finding.coverageStatus)}>{finding.coverageStatus}</Badge>
-          )}
-          {finding.downstreamPermission && (
-            <Badge variant="neutral">{finding.downstreamPermission}</Badge>
-          )}
-        </div>
-      </div>
-      <p className="text-sm text-gray-700 mb-2">{finding.findingText}</p>
-      <div className="space-y-1.5">
-        {finding.sourceTrace.map((trace, i) => (
-          <div key={i} className="text-xs bg-gray-50 border border-gray-100 rounded px-2 py-1.5">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-medium text-gray-600">{trace.sourceLabel}</span>
-              <span className="text-gray-400">({trace.sourceType})</span>
-              {trace.primary && <Badge variant="covered">primary</Badge>}
-              <span className="text-gray-400">usage: {trace.usage}</span>
-            </div>
-            <p className="text-gray-500 italic mt-0.5">"{trace.supportingText}"</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
+/** Matches a finding to a piece of existing Stage 1 UI text by topic or finding text. No fuzzy guessing beyond exact (normalized) match — an unmatched item just gets no trace chip. */
+export function findFindingByTopic(findings: Stage1Finding[] | undefined, topic: string): Stage1Finding | undefined {
+  if (!findings || !topic) return undefined
+  const target = normalize(topic)
+  return findings.find(f => normalize(f.topic) === target || normalize(f.findingText) === target)
+}
+
+/** Findings that don't correspond to any candidate label currently rendered inline — surfaced only in the debug fallback. */
+export function computeUnmatchedFindings(
+  findings: Stage1Finding[] | undefined,
+  candidateLabels: string[],
+): Stage1Finding[] {
+  if (!findings || findings.length === 0) return []
+  const matchedIds = new Set<string>()
+  for (const label of candidateLabels) {
+    const match = findFindingByTopic(findings, label)
+    if (match) matchedIds.add(match.id)
+  }
+  return findings.filter(f => !matchedIds.has(f.id))
 }
 
 function coverageVariant(status: Stage1Finding['coverageStatus']) {
@@ -81,4 +38,107 @@ function coverageVariant(status: Stage1Finding['coverageStatus']) {
     case 'context_only': return 'neutral' as const
     default: return 'neutral' as const
   }
+}
+
+/** Compact source-trace body for a single finding — meant to be expanded next to the content it explains, not listed standalone. */
+export function FindingTraceDetails({ finding, showTopic = false }: { finding: Stage1Finding; showTopic?: boolean }) {
+  return (
+    <div className="border border-gray-200 rounded p-2 bg-gray-50 space-y-1.5 text-left">
+      {showTopic && <p className="text-xs font-medium text-gray-600">{finding.topic}</p>}
+      <div className="flex gap-1 flex-wrap">
+        {finding.coverageStatus && (
+          <Badge variant={coverageVariant(finding.coverageStatus)}>{finding.coverageStatus}</Badge>
+        )}
+        {finding.downstreamPermission && <Badge variant="neutral">{finding.downstreamPermission}</Badge>}
+      </div>
+      <div className="space-y-1">
+        {finding.sourceTrace.map((trace, i) => (
+          <div key={i} className="text-xs">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="font-medium text-gray-600">{trace.sourceLabel}</span>
+              <span className="text-gray-400">({trace.sourceType})</span>
+              {trace.primary && <Badge variant="covered">primary</Badge>}
+              <span className="text-gray-400">usage: {trace.usage}</span>
+            </div>
+            <p className="text-gray-500 italic">"{trace.supportingText}"</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** Small chip that expands inline to a finding's trace. Renders nothing if no finding is passed. */
+export function TraceChip({ finding, label = 'Trace' }: { finding?: Stage1Finding; label?: string }) {
+  const [open, setOpen] = useState(false)
+  if (!finding) return null
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="text-[10px] px-1.5 py-0.5 rounded border border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-200 shrink-0"
+      >
+        {open ? 'Hide trace' : label}
+      </button>
+      {open && (
+        <div className="mt-1 w-full">
+          <FindingTraceDetails finding={finding} />
+        </div>
+      )}
+    </>
+  )
+}
+
+/**
+ * A bulleted line (risk gap, needs-evidence item, weakly-supported item) that gets a trace
+ * chip only when a matching finding exists. With no match, renders exactly as before.
+ */
+export function TraceableBullet({
+  text,
+  finding,
+  className,
+}: {
+  text: string
+  finding?: Stage1Finding
+  className?: string
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <li className={className}>
+      <div className="flex items-start gap-2">
+        <span className="shrink-0">·</span>
+        <span className="flex-1">{text}</span>
+        {finding && (
+          <button
+            type="button"
+            onClick={() => setOpen(o => !o)}
+            className="text-[10px] px-1.5 py-0.5 rounded border border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-200 shrink-0"
+          >
+            {open ? 'Hide trace' : 'Trace'}
+          </button>
+        )}
+      </div>
+      {finding && open && (
+        <div className="ml-4 mt-1">
+          <FindingTraceDetails finding={finding} />
+        </div>
+      )}
+    </li>
+  )
+}
+
+/** Collapsed-by-default debug fallback for findings that exist but weren't matched to any rendered item. */
+export function UnmatchedFindingsDebug({ findings }: { findings: Stage1Finding[] }) {
+  if (findings.length === 0) return null
+  return (
+    <details className="border border-dashed border-gray-300 rounded p-2 text-xs text-gray-400">
+      <summary className="cursor-pointer select-none">Unmatched source findings ({findings.length})</summary>
+      <div className="mt-2 space-y-2">
+        {findings.map(f => (
+          <FindingTraceDetails key={f.id} finding={f} showTopic />
+        ))}
+      </div>
+    </details>
+  )
 }

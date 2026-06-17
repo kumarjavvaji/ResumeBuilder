@@ -1,9 +1,11 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { getUserProfile } from '@/lib/storage/user-profile'
 import { saveSession } from '@/lib/storage/sessions'
 import { nanoid } from '@/lib/storage/nanoid'
+import { getActiveSnapshot } from '@/lib/profile/profileSnapshotStore'
+import { buildEvidenceIndex } from '@/lib/profile/profileProjectionService'
 import type {
   TargetIntake,
   Stage1Status,
@@ -12,12 +14,14 @@ import type {
   JDRequirementMap,
   DomainIQImport,
   FitAnalysis,
+  UserProfile,
+  ProfileEvidenceIndexItem,
 } from '@/contracts'
 import { deriveStageStatuses, canCompleteStage1 } from '@/contracts'
 import { Spinner } from '@/components/shared/spinner'
 import { inputCls, textareaCls } from '@/lib/input-cls'
 import { JDRequirementMapView } from './jd-requirement-map-view'
-import { Stage1FindingsView } from './stage1-findings-view'
+import { findFindingByTopic, TraceChip, TraceableBullet, computeUnmatchedFindings, UnmatchedFindingsDebug } from './stage1-findings-view'
 
 // ─── Stage1Status derivation ──────────────────────────────────────────────────
 
@@ -83,52 +87,36 @@ function SectionLabel({ n, text }: { n: string; text: string }) {
 
 // ─── Step 1: Resume / Profile ─────────────────────────────────────────────────
 
-type ProfileMode = 'upload' | 'use-saved' | null
-
-function ProfileSection({ mode, onMode }: { mode: ProfileMode; onMode: (m: ProfileMode) => void }) {
+function ProfileSection({ profile }: { profile: UserProfile | null | undefined }) {
   return (
     <div>
-      <SectionLabel n="1" text="Resume / Profile" />
-      <div className="space-y-2">
-        <Collapse
-          label="Upload existing resume"
-          hint="PDF or Word — parsed into profile fields"
-          open={mode === 'upload'}
-          onToggle={() => onMode(mode === 'upload' ? null : 'upload')}
-        >
-          <label className="block text-xs font-medium text-gray-700 mb-1">Resume file</label>
-          <p className="text-xs text-gray-500 mb-2">
-            Upload a PDF or Word resume. The system will parse it into your profile fields.
+      <SectionLabel n="1" text="Candidate Profile" />
+      {profile === undefined ? (
+        <p className="text-xs text-gray-400">Loading profile...</p>
+      ) : profile === null ? (
+        <div className="border border-amber-200 bg-amber-50 rounded-lg px-4 py-3">
+          <p className="text-sm text-amber-800">
+            No saved profile found. Go to{' '}
+            <a href="/profile" className="underline hover:text-amber-900">/profile</a>{' '}
+            and complete it before starting a session.
           </p>
-          <input
-            type="file"
-            accept=".pdf,.doc,.docx"
-            className="text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border file:border-gray-300 file:text-xs file:font-medium file:bg-white hover:file:bg-gray-50"
-          />
-          <p className="text-xs text-amber-600">Resume parsing is coming soon. Use your saved profile for now.</p>
-        </Collapse>
-
-        <Collapse
-          label="Use saved profile"
-          hint="Pull from your /profile work history"
-          open={mode === 'use-saved'}
-          onToggle={() => onMode(mode === 'use-saved' ? null : 'use-saved')}
-        >
-          <p className="text-xs text-gray-500">
-            Your profile from{' '}
-            <a href="/profile" className="underline hover:text-gray-700">
-              /profile
-            </a>{' '}
-            will be used as the candidate context for this session.
+        </div>
+      ) : (
+        <div className="border border-gray-200 rounded-lg px-4 py-3 bg-gray-50">
+          <p className="text-sm text-gray-700">
+            Your saved profile will be used as candidate context for this session.
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            {profile.fullName} · {profile.workHistory.length} role{profile.workHistory.length === 1 ? '' : 's'} · {profile.skills.length} skill{profile.skills.length === 1 ? '' : 's'}
           </p>
           <a
             href="/profile"
-            className="inline-block text-xs font-medium text-gray-900 underline underline-offset-2 hover:text-gray-600"
+            className="inline-block mt-2 text-xs font-medium text-gray-900 underline underline-offset-2 hover:text-gray-600"
           >
             Review or edit profile →
           </a>
-        </Collapse>
-      </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -840,8 +828,12 @@ const EMPTY_REQUIREMENT_MAP: JDRequirementMap = {
 
 export function IntakeForm() {
   const router = useRouter()
-  const [profileMode, setProfileMode] = useState<ProfileMode>('use-saved')
+  const [profile, setProfile] = useState<UserProfile | null | undefined>(undefined)
   const [jdMode, setJDMode] = useState<JDMode>('paste')
+
+  useEffect(() => {
+    getUserProfile().then(p => setProfile(p ?? null))
+  }, [])
 
   const [roleTitle, setRoleTitle] = useState('')
   const [company, setCompany] = useState('')
@@ -858,6 +850,7 @@ export function IntakeForm() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState<null | Awaited<ReturnType<typeof runIntake>>>(null)
+  const [showTrace, setShowTrace] = useState(false)
 
   const stage1Status = deriveStage1Status({
     jdText,
@@ -899,7 +892,9 @@ export function IntakeForm() {
 
     setLoading(true)
     try {
-      const data = await runIntake(jdText, domainIQText, profile, jdSourceType, roleTitle, company)
+      const snapshot = await getActiveSnapshot()
+      const profileEvidenceIndex = snapshot ? buildEvidenceIndex(snapshot) : []
+      const data = await runIntake(jdText, domainIQText, profile, jdSourceType, roleTitle, company, profileEvidenceIndex)
       setResult(data)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Analysis failed.')
@@ -982,7 +977,7 @@ export function IntakeForm() {
 
   return (
     <div className="space-y-8">
-      <ProfileSection mode={profileMode} onMode={setProfileMode} />
+      <ProfileSection profile={profile} />
 
       <div className="border-t border-gray-100 pt-6" />
 
@@ -1068,9 +1063,30 @@ export function IntakeForm() {
 
       {result && (
         <div className="mt-8 space-y-8">
-          <IntakeSynthesisView synthesis={result.synthesis} />
-          <JDRequirementMapView map={result.requirementMap} />
-          <Stage1FindingsView findings={result.fitAnalysis?.findings} />
+          <div className="flex justify-end">
+            <label className="flex items-center gap-2 text-xs text-gray-400 select-none cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showTrace}
+                onChange={e => setShowTrace(e.target.checked)}
+              />
+              Show evidence trace
+            </label>
+          </div>
+          <IntakeSynthesisView synthesis={result.synthesis} findings={result.fitAnalysis?.findings} showTrace={showTrace} />
+          <JDRequirementMapView map={result.requirementMap} findings={result.fitAnalysis?.findings} showTrace={showTrace} />
+          {showTrace && (
+            <UnmatchedFindingsDebug
+              findings={computeUnmatchedFindings(result.fitAnalysis?.findings, [
+                ...result.requirementMap.required.map(r => r.text),
+                ...result.requirementMap.niceToHave.map(r => r.text),
+                ...(result.requirementMap.needsEvidenceItems ?? result.requirementMap.unsupportedRequirements ?? []),
+                ...result.requirementMap.weaklySupportedRequirements,
+                ...result.synthesis.riskGaps,
+                'company_context',
+              ])}
+            />
+          )}
         </div>
       )}
     </div>
@@ -1079,6 +1095,8 @@ export function IntakeForm() {
 
 function IntakeSynthesisView({
   synthesis,
+  findings,
+  showTrace,
 }: {
   synthesis: {
     companySummary: string
@@ -1086,16 +1104,25 @@ function IntakeSynthesisView({
     riskGaps: string[]
     emphasisRecommendation: string
   }
+  findings?: import('@/contracts').Stage1Finding[]
+  showTrace: boolean
 }) {
+  const companyContextFinding = showTrace ? findFindingByTopic(findings, 'company_context') : undefined
   return (
     <div className="space-y-5">
       <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Company Context</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Company Context</h3>
+          {showTrace && <TraceChip finding={companyContextFinding} label="Why" />}
+        </div>
         <p className="text-sm text-gray-700">{synthesis.companySummary}</p>
       </div>
       <div>
         <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Fit Hypothesis</h3>
         <p className="text-sm text-gray-700">{synthesis.fitHypothesis}</p>
+        {showTrace && (
+          <p className="text-xs text-gray-400 italic mt-1">No formal trace yet</p>
+        )}
       </div>
       <div>
         <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Emphasis Recommendation</h3>
@@ -1108,10 +1135,12 @@ function IntakeSynthesisView({
           <h3 className="text-xs font-semibold uppercase tracking-wide text-amber-600 mb-2">Risk / Gap Areas</h3>
           <ul className="space-y-1">
             {synthesis.riskGaps.map((gap, i) => (
-              <li key={i} className="text-sm text-amber-700 flex gap-2">
-                <span className="shrink-0">·</span>
-                {gap}
-              </li>
+              <TraceableBullet
+                key={i}
+                text={gap}
+                finding={showTrace ? findFindingByTopic(findings, gap) : undefined}
+                className="text-sm text-amber-700"
+              />
             ))}
           </ul>
         </div>
@@ -1126,12 +1155,13 @@ async function runIntake(
   profile: unknown,
   jdSourceType: JDSourceType = 'pasted_jd',
   roleTitle?: string,
-  company?: string
+  company?: string,
+  profileEvidenceIndex?: ProfileEvidenceIndexItem[]
 ) {
   const res = await fetch('/api/intake', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jdText, domainIQText, profile, jdSourceType, roleTitle, company }),
+    body: JSON.stringify({ jdText, domainIQText, profile, jdSourceType, roleTitle, company, profileEvidenceIndex }),
   })
   if (!res.ok) {
     const err = await res.json()

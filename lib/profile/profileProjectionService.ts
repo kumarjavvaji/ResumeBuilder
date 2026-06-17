@@ -10,6 +10,7 @@ import type {
   ProfileMetric,
   ProfileSkill,
   ProfileTool,
+  ProfileEvidenceIndexItem,
   SectionType,
   SnapshotLearningSignal,
   SnapshotRefinementDirection,
@@ -129,4 +130,61 @@ export function projectSnapshot(
     constraints: dimensions.constraints,
     unresolvedConflicts: snapshot.unresolvedConflicts,
   }
+}
+
+// ─── Stage 1 evidence index ────────────────────────────────────────────────────
+// Compact, bounded projection used to ground JD parsing — not section-targeted,
+// not persisted. Reusable/source-tracked claims first, then skills, then tools.
+
+const STRENGTH_RANK = { strong: 2, medium: 1, weak: 0 }
+
+/** Builds a bounded evidence index from the active snapshot for Stage 1 JD grounding. */
+export function buildEvidenceIndex(
+  snapshot: ProfileSnapshot,
+  maxItems = 60
+): ProfileEvidenceIndexItem[] {
+  const { dimensions } = snapshot
+
+  const claimItems: ProfileEvidenceIndexItem[] = dimensions.experienceClaims
+    .filter(c => c.status === 'active' && c.evidenceStrength !== 'weak')
+    .map(c => ({
+      claimId: c.claimId,
+      normalizedKey: c.normalizedKey,
+      text: c.text,
+      category: c.category,
+      evidenceStrength: c.evidenceStrength,
+    }))
+
+  const skillItems: ProfileEvidenceIndexItem[] = dimensions.skills.map(s => ({
+    claimId: s.skillId,
+    normalizedKey: s.normalizedKey,
+    text: s.name,
+    category: 'skill' as const,
+    evidenceStrength: s.evidenceStrength,
+  }))
+
+  const toolItems: ProfileEvidenceIndexItem[] = dimensions.tools.map(t => ({
+    claimId: t.toolId,
+    normalizedKey: t.normalizedKey,
+    text: t.name,
+    category: 'tool' as const,
+    evidenceStrength: 'medium' as const,
+  }))
+
+  const all = [...claimItems, ...skillItems, ...toolItems].sort(
+    (a, b) => STRENGTH_RANK[b.evidenceStrength] - STRENGTH_RANK[a.evidenceStrength]
+  )
+
+  return all.slice(0, maxItems)
+}
+
+/** Compact text summary of an evidence index, for injection into the JD parsing prompt. */
+export function summarizeEvidenceIndex(index: ProfileEvidenceIndexItem[], maxChars = 2000): string {
+  const lines = index.map(i => `- [${i.category}] ${i.text}`)
+  let out = ''
+  for (const line of lines) {
+    if (out.length + line.length + 1 > maxChars) break
+    out += line + '\n'
+  }
+  return out.trim()
 }

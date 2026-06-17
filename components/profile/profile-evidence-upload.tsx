@@ -28,8 +28,8 @@ export function ProfileEvidenceUpload({ onComplete, onPrefillRequest }: Props) {
 
   async function handleFile(file: File) {
     const ext = file.name.split('.').pop()?.toLowerCase()
-    if (!['pdf', 'docx', 'doc'].includes(ext ?? '')) {
-      setError('Unsupported file type. Upload a PDF or DOCX.')
+    if (!['pdf', 'docx', 'doc', 'txt'].includes(ext ?? '')) {
+      setError('Unsupported file type. Upload a PDF, DOCX, or TXT.')
       return
     }
 
@@ -117,7 +117,7 @@ export function ProfileEvidenceUpload({ onComplete, onPrefillRequest }: Props) {
               {delta ? 'Upload another resume' : 'Upload resume as evidence'}
             </span>
             <span className="text-xs text-gray-400">
-              PDF or DOCX · claims are extracted and merged — existing profile data is preserved
+              PDF, DOCX, or TXT · claims are extracted and merged — existing profile data is preserved
             </span>
           </>
         )}
@@ -126,7 +126,7 @@ export function ProfileEvidenceUpload({ onComplete, onPrefillRequest }: Props) {
       <input
         ref={inputRef}
         type="file"
-        accept=".pdf,.docx,.doc"
+        accept=".pdf,.docx,.doc,.txt"
         className="hidden"
         onChange={handleInputChange}
       />
