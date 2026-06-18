@@ -500,6 +500,19 @@ export interface CalibrationReference {
   confidence: 'high' | 'medium' | 'low'
   limitations?: string
   collectedAt: string
+  // JD-alignment grouping — assigned at enrichment time, gates Stage 3B usage
+  calibrationGroup?: 'primary' | 'supporting' | 'context_only' | 'rejected'
+  sourceDepth?: 'rich' | 'moderate' | 'shallow'
+  useFor?: string[]
+  doNotUseFor?: string[]
+  jdAlignmentElements?: string[]
+  riskNote?: string
+  rejectedReason?: string
+  // Manual enrichment — user-pasted public profile context (calibration only, not user evidence)
+  manualContext?: string
+  manualContextUpdatedAt?: string
+  referenceDepth?: 'snippet_only' | 'manual_enriched'
+  enrichmentSource?: 'user_pasted'
 }
 
 export interface CalibrationSummary {
@@ -923,7 +936,7 @@ export interface Stage4SectionPlan {
 }
 
 export interface Stage4SessionDirection {
-  representPOFrom2021: boolean
+  representPrimaryPO: boolean
   avoidFormalTitleHedging: boolean
   targetPosture: string
   roadmapBoundary: string

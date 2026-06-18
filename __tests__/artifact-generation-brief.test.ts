@@ -1,5 +1,5 @@
-/**
- * Tests for the Artifact Generation Brief — the structured context built before
+﻿/**
+ * Tests for the Artifact Generation Brief â€” the structured context built before
  * every Anthropic artifact-generation or refinement call.
  *
  * Success criteria tested here:
@@ -25,7 +25,7 @@ import {
 } from '@/lib/llm/artifact-generation-brief'
 import type { ScopedEvidenceBundle } from '@/lib/evidence-scope'
 
-// ─── Fixtures ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Fixtures â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function analyticsJDMap(): JDRequirementMap {
   return {
@@ -41,7 +41,7 @@ function analyticsJDMap(): JDRequirementMap {
       { text: 'Salesforce reporting', category: 'tool', userCoverageStatus: 'covered' },
       { text: 'Pendo product analytics', category: 'tool', userCoverageStatus: 'covered' },
     ],
-    realJobFunction: 'Product Analyst — Member Insights & Analytics',
+    realJobFunction: 'Product Analyst â€” Member Insights & Analytics',
     needsEvidenceItems: ['direct deposit and lending experience'],
     unsupportedRequirements: ['direct deposit and lending experience'],
     weaklySupportedRequirements: ['opportunity sizing'],
@@ -52,7 +52,7 @@ function minimalBundle(): ScopedEvidenceBundle {
   return {
     primaryWorkEntries: [
       {
-        id: 'w-1', company: 'Paylocity', title: 'Product Analyst',
+        id: 'w-1', company: 'SaaS Co', title: 'Product Analyst',
         startDate: '2020', endDate: '2023', domain: 'HCM',
         bullets: [
           'Analyzed 3,000+ support signals to identify backlog priorities.',
@@ -103,9 +103,9 @@ function personalSignals(): LearningSignal[] {
       content: 'For financial-services analyst roles, domain facts from DIQ should steer language but must not become candidate claims.',
       context: 'analytics', createdAt: '2026-01-01T00:00:00.000Z',
     },
-    // This is a raw bullet — NOT a strategy signal. Should not appear in the brief.
+    // This is a raw bullet â€” NOT a strategy signal. Should not appear in the brief.
     {
-      // @ts-expect-error — intentionally testing that old content types are excluded
+      // @ts-expect-error â€” intentionally testing that old content types are excluded
       id: 's-3', scope: 'personal', type: 'accepted-bullet',
       content: 'Analyzed 3,000+ support signals to identify backlog priorities.',
       context: 'raw-bullet', createdAt: '2026-01-01T00:00:00.000Z',
@@ -113,14 +113,14 @@ function personalSignals(): LearningSignal[] {
   ]
 }
 
-// ─── 1. Brief is created before Anthropic calls ───────────────────────────────
+// â”€â”€â”€ 1. Brief is created before Anthropic calls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('1. ArtifactGenerationBrief has all required fields', () => {
   it('buildArtifactGenerationBrief returns a valid complete brief', () => {
     const brief = buildArtifactGenerationBrief({
       sectionType: 'summary',
       emphasis: 'BA',
-      roleTitle: 'Product Analyst – Member Insights & Analytics',
+      roleTitle: 'Product Analyst â€“ Member Insights & Analytics',
       company: 'Alliant Credit Union',
       jdMap: analyticsJDMap(),
       bundle: bundleForSection('summary'),
@@ -132,7 +132,7 @@ describe('1. ArtifactGenerationBrief has all required fields', () => {
 
     expect(brief.artifactType).toBeTruthy()
     expect(brief.targetContext.company).toBe('Alliant Credit Union')
-    expect(brief.targetContext.roleTitle).toBe('Product Analyst – Member Insights & Analytics')
+    expect(brief.targetContext.roleTitle).toBe('Product Analyst â€“ Member Insights & Analytics')
     expect(brief.targetContext.roleFamily).toBeTruthy()
     expect(brief.evaluatorLens.likelyReader).toBeTruthy()
     expect(brief.candidateEvidence).toBeDefined()
@@ -144,7 +144,7 @@ describe('1. ArtifactGenerationBrief has all required fields', () => {
   })
 })
 
-// ─── 2. Anthropic prompt includes evaluator lens ─────────────────────────────
+// â”€â”€â”€ 2. Anthropic prompt includes evaluator lens â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('2. Anthropic prompt includes evaluator lens', () => {
   it('serializeBriefForPrompt includes EVALUATOR LENS section', () => {
@@ -201,7 +201,7 @@ describe('2. Anthropic prompt includes evaluator lens', () => {
   })
 })
 
-// ─── 3. Anthropic prompt includes allowed and prohibited claims ───────────────
+// â”€â”€â”€ 3. Anthropic prompt includes allowed and prohibited claims â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('3. Anthropic prompt includes allowed and prohibited claims', () => {
   it('brief prohibited claims include unsupported JD requirements', () => {
@@ -253,15 +253,15 @@ describe('3. Anthropic prompt includes allowed and prohibited claims', () => {
       constraints: [],
     })
     const allowed = brief.candidateEvidence.allowedEvidence.join(' ')
-    expect(allowed).toContain('Paylocity')
+    expect(allowed).toContain('SaaS Co')
     expect(allowed).not.toContain('Prior Co') // supporting only, not primary
   })
 })
 
-// ─── 4. Summary generation obeys line budget ─────────────────────────────────
+// â”€â”€â”€ 4. Summary generation obeys line budget â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('4. Summary generation obeys line budget', () => {
-  it('summary artifact strategy has 3–4 line budget', () => {
+  it('summary artifact strategy has 3â€“4 line budget', () => {
     const brief = buildArtifactGenerationBrief({
       sectionType: 'summary',
       emphasis: 'BA',
@@ -294,7 +294,7 @@ describe('4. Summary generation obeys line budget', () => {
   })
 })
 
-// ─── 5. Skills section uses JD-aligned ATS terms ─────────────────────────────
+// â”€â”€â”€ 5. Skills section uses JD-aligned ATS terms â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('5. Skills generation uses JD-aligned ATS terms', () => {
   it('skills brief emphasis includes analytics-critical terms', () => {
@@ -332,14 +332,14 @@ describe('5. Skills generation uses JD-aligned ATS terms', () => {
   })
 })
 
-// ─── 6. PO section is reframed for Product Analyst target ────────────────────
+// â”€â”€â”€ 6. PO section is reframed for Product Analyst target â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('6. PO section reframed for Product Analyst role', () => {
   it('experience-po deemphasis includes roadmap ownership language', () => {
     const brief = buildArtifactGenerationBrief({
       sectionType: 'experience-po',
       emphasis: 'BA',
-      roleTitle: 'Product Analyst – Member Insights',
+      roleTitle: 'Product Analyst â€“ Member Insights',
       company: 'Alliant',
       jdMap: analyticsJDMap(),
       bundle: bundleForSection('experience-po'),
@@ -386,7 +386,7 @@ describe('6. PO section reframed for Product Analyst role', () => {
   })
 })
 
-// ─── 7. Product Analyst section > QA section priority for analytics role ─────
+// â”€â”€â”€ 7. Product Analyst section > QA section priority for analytics role â”€â”€â”€â”€â”€
 
 describe('7. Product Analyst section outranks QA for analytics role', () => {
   it('experience-ba is primary for analytics role', () => {
@@ -440,13 +440,13 @@ describe('7. Product Analyst section outranks QA for analytics role', () => {
       bundle: bundleForSection('experience-qa'),
       acceptedSignals: [], globalSignals: [], rejectedPhrases: [], constraints: [],
     })
-    // BA gets 4–6 bullets, QA gets 3–4
+    // BA gets 4â€“6 bullets, QA gets 3â€“4
     expect(baBrief.artifactStrategy.lineBudget).toMatch(/4.{1,3}6/)
     expect(qaBrief.artifactStrategy.lineBudget).toMatch(/3.{1,3}4/)
   })
 })
 
-// ─── 8. DIQ company facts are not converted into candidate claims ─────────────
+// â”€â”€â”€ 8. DIQ company facts are not converted into candidate claims â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('8. DIQ company facts do not become candidate claims', () => {
   it('generationRules.doNotCopyDIQAsCandidateExperience is always true', () => {
@@ -484,9 +484,9 @@ describe('8. DIQ company facts do not become candidate claims', () => {
   })
 })
 
-// ─── 9. Stage 5 strategy signals influence without raw bullets ────────────────
+// â”€â”€â”€ 9. Stage 5 strategy signals influence without raw bullets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-describe('9. Stage 5 strategy signals used — raw bullets excluded', () => {
+describe('9. Stage 5 strategy signals used â€” raw bullets excluded', () => {
   it('accepted-bullet type signals are excluded from brief learning signals', () => {
     const brief = buildArtifactGenerationBrief({
       sectionType: 'summary',
@@ -547,18 +547,18 @@ describe('9. Stage 5 strategy signals used — raw bullets excluded', () => {
   })
 })
 
-// ─── 10. Section refinement prompt overrides overall for that artifact only ───
+// â”€â”€â”€ 10. Section refinement prompt overrides overall for that artifact only â”€â”€â”€
 
 describe('10. Section refinement prompt scopes correctly', () => {
   it('overall prompt appears in user content BEFORE section instruction', () => {
     // This is a prompt-assembly contract: overall prompt is SESSION-WIDE context,
     // section instruction is the specific override.
     const overallPrompt = 'Focus on BA delivery over generic PO language.'
-    const sectionInstruction = 'Tighten this specific section — remove QA references.'
+    const sectionInstruction = 'Tighten this specific section â€” remove QA references.'
 
     const lines: string[] = []
     if (overallPrompt) {
-      lines.push('SESSION-WIDE REFINEMENT DIRECTION (applies as background strategy to all sections — not a license to invent claims):')
+      lines.push('SESSION-WIDE REFINEMENT DIRECTION (applies as background strategy to all sections â€” not a license to invent claims):')
       lines.push(overallPrompt)
       lines.push('')
     }
@@ -574,7 +574,7 @@ describe('10. Section refinement prompt scopes correctly', () => {
   })
 
   it('refining section A with instruction does not produce changes to section B evidence', () => {
-    // Different sections generate different briefs — the brief is per-section.
+    // Different sections generate different briefs â€” the brief is per-section.
     const sectionABrief = buildArtifactGenerationBrief({
       sectionType: 'summary',
       emphasis: 'BA',
@@ -594,7 +594,7 @@ describe('10. Section refinement prompt scopes correctly', () => {
       acceptedSignals: [], globalSignals: [], rejectedPhrases: [], constraints: [],
     })
 
-    // Briefs are distinct — different artifact types and strategies
+    // Briefs are distinct â€” different artifact types and strategies
     expect(sectionABrief.artifactType).not.toBe(sectionBBrief.artifactType)
     // Section B purpose refers to BA/Product Analyst section specifically
     expect(sectionBBrief.artifactStrategy.purpose).toContain('Primary evidence section')
@@ -603,7 +603,7 @@ describe('10. Section refinement prompt scopes correctly', () => {
   })
 
   it('detectRoleFamily correctly identifies product analytics from title', () => {
-    const roleFamily = detectRoleFamily('BA', 'Product Analyst – Member Insights & Analytics', analyticsJDMap())
+    const roleFamily = detectRoleFamily('BA', 'Product Analyst â€“ Member Insights & Analytics', analyticsJDMap())
     expect(roleFamily).toBe('product-analytics')
   })
 
@@ -623,3 +623,4 @@ describe('10. Section refinement prompt scopes correctly', () => {
     expect(roleFamily).toBe('business-analyst')
   })
 })
+

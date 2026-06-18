@@ -43,15 +43,15 @@ export function buildResumeGenerationContract(input: ContractBuildInput): Resume
   const sectionPlan = defaultSectionPlan(targetRoleFamily)
 
   const azureDevOpsAllowed = detectAzureDevOpsAllowed(profile)
-  const representPOFrom2021 = detectPOFrom2021(overallRefinementPrompt, profile)
+  const representPrimaryPO = detectPrimaryPORole(overallRefinementPrompt, profile)
   const avoidFormalTitleHedging =
-    representPOFrom2021 ||
+    representPrimaryPO ||
     /hedg|PO-adjacent|acting PO|informal PO/i.test(overallRefinementPrompt)
 
   const salesforcePreferredPhrase = detectSalesforcePhrase(overallRefinementPrompt)
 
   const sessionDirection: Stage4SessionDirection = {
-    representPOFrom2021,
+    representPrimaryPO,
     avoidFormalTitleHedging,
     targetPosture: deriveTargetPosture(targetRoleFamily, roleTitleLower),
     roadmapBoundary:
@@ -69,8 +69,10 @@ export function buildResumeGenerationContract(input: ContractBuildInput): Resume
     'managed the team': 'led the squad',
   }
   if (avoidFormalTitleHedging) {
-    preferredReplacements['formal PO title experience'] = '3.5 years leading backlog execution'
-    preferredReplacements['formal PO tenure'] = '3.5 years leading backlog execution'
+    const poTenure = computePOTenure(profile)
+    const tenureLabel = poTenure ? `${poTenure} leading backlog execution` : 'backlog execution and sprint delivery'
+    preferredReplacements['formal PO title experience'] = tenureLabel
+    preferredReplacements['formal PO tenure'] = tenureLabel
     preferredReplacements['PO-adjacent'] = 'Product Owner'
     preferredReplacements['acting PO'] = 'Product Owner'
     preferredReplacements['informal PO'] = 'Product Owner'
@@ -84,8 +86,6 @@ export function buildResumeGenerationContract(input: ContractBuildInput): Resume
     ...jdMap.niceToHave.map(r => r.text),
   ].join(' ').toLowerCase()
 
-  const jdHasSupplyChain = /supply chain|distribution|logistics|cpg|enterprise it/i.test(jdText)
-
   const evidenceRouting: Record<string, string[]> = {
     CSPO: ['summary', 'education'],
     Jira: ['skills', 'experience-po', 'experience-ba'],
@@ -93,7 +93,8 @@ export function buildResumeGenerationContract(input: ContractBuildInput): Resume
     'travel willingness': [],
     'Azure DevOps': azureDevOpsAllowed ? ['skills'] : [],
     'roadmap ownership': ['experience-po'],
-    GAINSystems: jdHasSupplyChain ? ['summary'] : [],
+    // Dynamic: older/non-primary employer entries routed to summary when JD needs their domain
+    ...buildDynamicEmployerRouting(profile, jdText),
   }
 
   return {
@@ -165,12 +166,73 @@ function deriveTargetPosture(roleFamily: Stage4RoleFamily, roleTitleLower: strin
 
 // ─── Session direction helpers ────────────────────────────────────────────────
 
-function detectPOFrom2021(overallPrompt: string, profile: UserProfile): boolean {
-  if (/2021.*product owner|product owner.*2021|march 2021|treat.*2021|represent.*2021/i.test(overallPrompt)) return true
+function detectPrimaryPORole(overallPrompt: string, profile: UserProfile): boolean {
   if (/treat.*product owner|represent.*product owner/i.test(overallPrompt)) return true
-  return profile.workHistory.some(
-    w => /product owner/i.test(w.title) && (w.startDate?.includes('2021') || w.startDate?.includes('Mar 2021'))
-  )
+  if (/treat.*PO|represent.*PO/i.test(overallPrompt)) return true
+  return profile.workHistory.some(w => /product owner/i.test(w.title))
+}
+
+/**
+ * Computes PO role tenure from work history dates.
+ * Returns e.g. "3.5 years" or "18 months" — or "" if dates can't be parsed.
+ * Replaces the previously hardcoded "3.5 years" literal.
+ */
+function computePOTenure(profile: UserProfile): string {
+  const poEntry = profile.workHistory.find(w => /product owner/i.test(w.title))
+  if (!poEntry) return ''
+
+  const parseDate = (d: string): Date | null => {
+    if (!d) return null
+    if (/^present$/i.test(d)) return new Date()
+    const months: Record<string, number> = {
+      jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+      jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+    }
+    const parts = d.trim().toLowerCase().split(/\s+/)
+    if (parts.length === 2) {
+      const monthKey = parts[0].slice(0, 3)
+      const year = parseInt(parts[1])
+      if (months[monthKey] !== undefined && !isNaN(year)) return new Date(year, months[monthKey], 1)
+    }
+    if (parts.length === 1 && /^\d{4}$/.test(parts[0])) return new Date(parseInt(parts[0]), 0, 1)
+    return null
+  }
+
+  const start = parseDate(poEntry.startDate)
+  const end = poEntry.endDate === 'present' ? new Date() : parseDate(poEntry.endDate ?? '')
+  if (!start || !end) return ''
+
+  const totalMonths = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth())
+  if (totalMonths < 12) return `${totalMonths} months`
+  const years = totalMonths / 12
+  const rounded = Math.round(years * 2) / 2
+  return `${rounded} years`
+}
+
+/**
+ * Derives evidence routing for non-primary work history entries.
+ * When an older employer's domain matches JD requirements, routes that employer
+ * to the summary section so the LLM can reference it as supporting context.
+ * Replaces the hardcoded employer-specific routing that previously existed.
+ */
+function buildDynamicEmployerRouting(profile: UserProfile, jdTextLower: string): Record<string, string[]> {
+  const primaryKeywords = ['product owner', 'product manager', 'business analyst',
+    'product analyst', 'systems analyst', 'data analyst']
+  const routing: Record<string, string[]> = {}
+
+  for (const entry of profile.workHistory) {
+    const titleLower = entry.title.toLowerCase()
+    const isPrimary = primaryKeywords.some(kw => titleLower.includes(kw))
+    if (isPrimary) continue
+
+    const domain = (entry.domain ?? '').toLowerCase()
+    if (!domain) continue
+    const domainWords = domain.split(/\W+/).filter(w => w.length > 3)
+    const jdRelevant = domainWords.some(word => jdTextLower.includes(word))
+    if (jdRelevant) routing[entry.company] = ['summary']
+  }
+
+  return routing
 }
 
 function detectAzureDevOpsAllowed(profile: UserProfile): boolean {
@@ -737,7 +799,7 @@ export function serializeContractForPrompt(contract: ResumeGenerationContract): 
     `  QA: ${sp.qa.minBullets}–${sp.qa.maxBullets} bullets${contract.targetRoleFamily !== 'qa' ? ' (supporting only)' : ''}`,
     '',
     'SESSION DIRECTION:',
-    `  PO from 2021: ${sd.representPOFrom2021 ? 'YES — March 2021–October 2024 is Product Owner; no title hedging' : 'not set'}`,
+    `  Primary PO role: ${sd.representPrimaryPO ? 'YES — treat Product Owner work history as primary PO role; no title hedging' : 'not set'}`,
     `  Avoid title hedging: ${sd.avoidFormalTitleHedging ? 'YES — no defensive PO title language' : 'no'}`,
     `  Roadmap boundary: ${sd.roadmapBoundary}`,
     `  Azure DevOps: ${sd.azureDevOpsAllowed ? 'allowed' : 'NOT allowed — use Jira'}`,

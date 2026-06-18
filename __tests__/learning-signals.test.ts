@@ -1,5 +1,5 @@
-/**
- * Learning signal tests — these run against a real Dexie instance in jsdom.
+﻿/**
+ * Learning signal tests â€” these run against a real Dexie instance in jsdom.
  * Dexie with fake-indexeddb is used for isolation.
  */
 import { describe, it, expect, beforeEach } from 'vitest'
@@ -147,7 +147,7 @@ describe('personal vs global signal scope', () => {
     expect(promoted.scope).toBe('both')
     // Original personal content is preserved
     expect(promoted.content).toContain('Acme')
-    // Global content is anonymized — no employer names
+    // Global content is anonymized â€” no employer names
     expect(promoted.globalContent).not.toContain('Acme')
   })
 
@@ -166,10 +166,10 @@ describe('personal vs global signal scope', () => {
   })
 
   it('privacy boundary: global content must not reference employers from personal content', () => {
-    const personalContent = 'Led backlog at Paylocity for 3 scrum teams across HR platform.'
+    const personalContent = 'Led backlog at SaaS Co for 3 scrum teams across HR platform.'
     const globalContent = 'PO artifact strategy: multi-team backlog ownership in SaaS platforms should lead with delivery scope and cross-team coordination outcomes.'
 
-    expect(globalContent).not.toContain('Paylocity')
+    expect(globalContent).not.toContain('SaaS Co')
     expect(globalContent).not.toContain('HR platform')
     expect(globalContent.length).toBeGreaterThan(0)
   })
@@ -205,3 +205,4 @@ describe('rejected phrase prevention contract', () => {
     expect(detectRejected(generatedText, rejectedPhrases)).toBeNull()
   })
 })
+

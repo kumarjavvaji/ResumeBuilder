@@ -83,14 +83,10 @@ export const SECTION_EVIDENCE_SCOPES: Record<SectionType, SectionEvidenceScope> 
     crossRolePolicy: 'explicit-framing-required',
     requiredFramingRules: [
       'Non-PO role evidence must be explicitly framed as prior background, earlier experience, or cross-functional context.',
-      'Product Analyst metrics (e.g. 3,000+ Salesforce client requests) must not appear as PO accomplishments.',
+      'Prior-role metrics must not appear as PO accomplishments — cite only evidence from the PO work entry.',
     ],
-    disallowedClaimPatterns: [
-      '3,000+ salesforce',
-      'salesforce client request triage',
-      '3000+ client request',
-    ],
-    framingNote: `Role scope: Work entries under "Prior background" belong to other roles (BA/QA). If referenced, MUST frame as prior experience or earlier-career context — never as current PO work. Product Analyst metrics must not be presented as PO accomplishments.`,
+    disallowedClaimPatterns: [],
+    framingNote: `Role scope: Work entries under "Prior background" belong to other roles (BA/QA). If referenced, MUST frame as prior experience or earlier-career context — never as current PO work. Prior-role metrics must not be presented as PO accomplishments.`,
   },
   'experience-ba': {
     sectionType: 'experience-ba',
@@ -107,11 +103,11 @@ export const SECTION_EVIDENCE_SCOPES: Record<SectionType, SectionEvidenceScope> 
       'Do not claim end-to-end roadmap ownership as BA/PA work.',
     ],
     disallowedClaimPatterns: [
-      'calendar platform roadmap ownership',
-      'end-to-end calendar platform',
-      'owned the calendar platform roadmap',
+      'end-to-end roadmap ownership',
+      'owned the product roadmap',
+      'product roadmap ownership',
     ],
-    framingNote: `Role scope: Work entries under "Prior background" belong to other roles (PO/QA). PO entries may only be referenced as later-career progression or cross-functional context — never as BA/PA role history. Do not claim Calendar Platform roadmap ownership as BA work.`,
+    framingNote: `Role scope: Work entries under "Prior background" belong to other roles (PO/QA). PO entries may only be referenced as later-career progression or cross-functional context — never as BA/PA role history. Do not claim product roadmap ownership as BA/PA work.`,
   },
   'experience-qa': {
     sectionType: 'experience-qa',
@@ -128,7 +124,6 @@ export const SECTION_EVIDENCE_SCOPES: Record<SectionType, SectionEvidenceScope> 
       'Roadmap ownership, backlog management, and product strategy must not appear as QA accomplishments.',
     ],
     disallowedClaimPatterns: [
-      'calendar platform roadmap',
       'product roadmap ownership',
       'roadmap ownership',
     ],
@@ -196,6 +191,10 @@ export const SECTION_EVIDENCE_SCOPES: Record<SectionType, SectionEvidenceScope> 
 export interface NormalizedBridgeEvidence {
   answerId: string
   questionId: string
+  /** The original question text — included in the prompt so the LLM knows what gap the answer closed. */
+  originalQuestion: string
+  /** Bridge question type (gap / evidence / metric / domain-translation / emphasis / underused-experience). */
+  questionType: string
   applicableSections: SectionType[]
   applicableRoles: EmphasisCategory[]
   evidenceType: BridgeEvidenceType
@@ -268,9 +267,16 @@ export function buildScopedEvidenceBundle(
   // Allowed metrics: only from primary entries
   const allowedMetrics = usePrimary.flatMap(w => w.approvedMetrics)
 
+  // Merge static disallowed patterns with patterns derived from the active profile.
+  // This restores cross-role metric contamination detection without hardcoding personal values.
+  const dynamicDisallowed = buildDynamicDisallowedPatterns(profile, sectionType)
+  const mergedScope: SectionEvidenceScope = dynamicDisallowed.length > 0
+    ? { ...scope, disallowedClaimPatterns: [...scope.disallowedClaimPatterns, ...dynamicDisallowed] }
+    : scope
+
   return {
     sectionType,
-    scope,
+    scope: mergedScope,
     primaryWorkEntries: usePrimary,
     supportingWorkEntries: useSupporting,
     normalizedBridgeEvidence,
@@ -278,6 +284,35 @@ export function buildScopedEvidenceBundle(
     allowedMetrics,
     globalGapWarnings: [],  // populated separately from JD map when needed
   }
+}
+
+/**
+ * Derives disallowed claim patterns for a section from the active user profile.
+ *
+ * For role-specific sections (experience-po, -ba, -qa) the approved metrics from
+ * NON-primary roles must not bleed into that section's bullets. This replaces
+ * the previous approach of hardcoding personal metric strings in SECTION_EVIDENCE_SCOPES.
+ *
+ * Different users with different metric text will automatically get the correct
+ * disallowed patterns without any source changes.
+ */
+export function buildDynamicDisallowedPatterns(profile: UserProfile, sectionType: SectionType): string[] {
+  const scope = SECTION_EVIDENCE_SCOPES[sectionType]
+  if (scope.roleTitleKeywords.length === 0) return []
+
+  const nonPrimaryEntries = profile.workHistory.filter(
+    w => !scope.roleTitleKeywords.some(kw => w.title.toLowerCase().includes(kw.toLowerCase()))
+  )
+
+  const patterns: string[] = []
+  for (const entry of nonPrimaryEntries) {
+    for (const metric of entry.approvedMetrics ?? []) {
+      // Normalize: lowercase, strip operators and punctuation, collapse whitespace
+      const normalized = metric.toLowerCase().replace(/[~$+%,]/g, '').replace(/\s+/g, ' ').trim()
+      if (normalized.length > 4) patterns.push(normalized)
+    }
+  }
+  return patterns
 }
 
 function isBridgeQuestionInScope(
@@ -315,6 +350,8 @@ export function normalizeBridgeAnswer(q: BridgeQuestion): NormalizedBridgeEviden
   return {
     answerId: q.id,
     questionId: q.id,
+    originalQuestion: q.question,
+    questionType: q.type,
     applicableSections,
     applicableRoles,
     evidenceType,

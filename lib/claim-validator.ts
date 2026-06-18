@@ -38,7 +38,7 @@ function resolveEntryFromRef(
   if (!evidenceRef) return null
   const lower = evidenceRef.toLowerCase()
   // Match on job title only — company alone is too ambiguous when multiple
-  // roles share the same employer (e.g. Product Owner + Product Analyst both at Paylocity).
+  // roles share the same employer (e.g. Product Owner + Product Analyst at the same company).
   return entries.find(e => lower.includes(e.title.toLowerCase())) ?? null
 }
 

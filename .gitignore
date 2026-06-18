@@ -24,3 +24,5 @@ exports/
 generated/
 *.local
 *.tsbuildinfo
+# User-owned personal import files — never commit
+local/

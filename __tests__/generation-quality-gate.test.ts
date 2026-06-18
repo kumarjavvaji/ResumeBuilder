@@ -33,8 +33,8 @@ describe('1. Quality gate constants', () => {
     expect(SUMMARY_PROHIBITIONS).toContain('early career includes')
   })
 
-  it('1.3: SUMMARY_PROHIBITIONS includes GAINSystems', () => {
-    expect(SUMMARY_PROHIBITIONS).toContain('GAINSystems')
+  it('1.3: SUMMARY_PROHIBITIONS includes grounding phrasing', () => {
+    expect(SUMMARY_PROHIBITIONS).toContain('grounding operational')
   })
 
   it('1.4: SUMMARY_PROHIBITIONS includes "grounding operational" phrasing', () => {
@@ -68,9 +68,9 @@ describe('1. Quality gate constants', () => {
 // ─── 2. buildSectionQualityGate ───────────────────────────────────────────────
 
 describe('2. buildSectionQualityGate output', () => {
-  it('2.1: summary gate prohibits GAINSystems', () => {
+  it('2.1: summary gate prohibits older employers not required by JD', () => {
     const gate = buildSectionQualityGate('summary')
-    expect(gate).toContain('GAINSystems')
+    expect(gate).toContain('older employers not required by this JD')
   })
 
   it('2.2: summary gate prohibits "formal PO tenure"', () => {
@@ -150,9 +150,9 @@ describe('3. buildFullResumeQualityGate output', () => {
     expect(gate).toContain('formal PO tenure')
   })
 
-  it('3.3: full-resume gate checks for GAINSystems prohibition', () => {
+  it('3.3: full-resume gate prohibits older employers not required by JD', () => {
     const gate = buildFullResumeQualityGate()
-    expect(gate).toContain('GAINSystems')
+    expect(gate).toContain('older employers not relevant to this JD')
   })
 
   it('3.4: full-resume gate checks bullet line limit', () => {
@@ -198,8 +198,8 @@ describe('4. Quality gate wired into generate-artifact-section', () => {
     expect(src).toContain('qualityGate')
   })
 
-  it('4.3: summary typeInstruction prohibits GAINSystems', () => {
-    expect(src).toContain('GAINSystems')
+  it('4.3: summary typeInstruction prohibits older employers not required by JD', () => {
+    expect(src).toContain('older employers not required by this JD')
   })
 
   it('4.4: summary typeInstruction prohibits "formal PO tenure"', () => {
@@ -260,8 +260,8 @@ describe('6. Brief mustAvoid arrays carry quality gate prohibitions', () => {
     expect(src).toContain('"early career includes"')
   })
 
-  it('6.3: summary mustAvoid includes GAINSystems exclusion rule', () => {
-    expect(src).toContain('GAINSystems')
+  it('6.3: summary mustAvoid includes older employer exclusion rule', () => {
+    expect(src).toContain('older employers not relevant to this JD')
   })
 
   it('6.4: experience-ba mustAvoid includes PA overclaim prohibitions', () => {

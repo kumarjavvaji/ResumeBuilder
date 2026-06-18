@@ -310,7 +310,7 @@ function QuestionCard({
         <span className="text-xs text-gray-400">·</span>
         <span className="text-xs text-gray-400">{question.affectedArtifactSection}</span>
       </div>
-      <p className="text-sm font-medium text-gray-800 mb-3">{question.question}</p>
+      <p className="text-sm font-medium text-gray-100 mb-3">{question.question}</p>
 
       {question.status === 'answered' && !editing ? (
         <div className="bg-gray-50 rounded px-3 py-2 text-sm text-gray-700 mb-2">

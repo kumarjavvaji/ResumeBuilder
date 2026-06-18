@@ -45,7 +45,7 @@ const EXTRACT_TOOL_SCHEMA = {
             },
             sourceContext: {
               type: 'string',
-              description: 'Brief note on where this came from (e.g. "Paylocity PO role, 2021–2024").',
+              description: 'Brief note on where this came from (e.g. "Current employer PO role, 2021–2024").',
             },
           },
         },

@@ -1,7 +1,7 @@
-/**
+﻿/**
  * Stage 3 artifact generation correctness tests.
  *
- * These test pure logic and data-shape contracts — no LLM calls, no IndexedDB.
+ * These test pure logic and data-shape contracts â€” no LLM calls, no IndexedDB.
  *
  * Coverage (original 10):
  * 1.  Stage 3 blocks generation when Stage 1 is not analyzed (empty jdMap)
@@ -15,19 +15,19 @@
  * 9.  Signal influence summary is persisted when returned
  * 10. Manual edit saves content without changing status
  *
- * Role/source binding tests (11–20):
+ * Role/source binding tests (11â€“20):
  * 11. PO section excludes Product Analyst-only Salesforce triage bullet (disallowed pattern)
  * 12. BA section excludes Product Owner-only Calendar Platform ownership bullet (disallowed pattern)
  * 13. QA section excludes Product Owner Calendar Platform roadmap bullet (disallowed pattern)
  * 14. Professional Summary uses cross-role evidence (all entries in primaryEntries)
  * 15. Skills section receives full evidence with no disallowed patterns
  * 16. DocuSign workflow answer yields high/medium confidence (not an uncertainty answer)
- * 17. "I'm not sure" bridge answer classifies as 'none' confidence → no positive claims
+ * 17. "I'm not sure" bridge answer classifies as 'none' confidence â†’ no positive claims
  * 18. Insurance domain gap warning classified as global (not section-specific)
  * 19. Non-domain warning not classified as global (remains section-specific)
- * 20. PO section splits work history: PO entry → primary, BA entry → supporting
+ * 20. PO section splits work history: PO entry â†’ primary, BA entry â†’ supporting
  *
- * Architecture-level claim validation tests (21–30):
+ * Architecture-level claim validation tests (21â€“30):
  * 21. Claim from disallowed role is downgraded in role-specific section
  * 22. Claim from allowed role is preserved in role-specific section
  * 23. Cross-role claim with explicit framing is allowed (requires-framing disposition)
@@ -58,7 +58,7 @@ import type {
 } from '@/contracts'
 import { nanoid } from '@/lib/storage/nanoid'
 
-// ─── Fixtures ──────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Fixtures â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function makeSection(overrides: Partial<ArtifactSection> = {}): ArtifactSection {
   return {
@@ -100,7 +100,7 @@ const VALID_JD_MAP: JDRequirementMap = {
   weaklySupportedRequirements: []
 }
 
-// ─── Test 1: Stage 1 blocker ───────────────────────────────────────────────────
+// â”€â”€â”€ Test 1: Stage 1 blocker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('Stage 1 prerequisite gate', () => {
   /** Mirrors the API-route guard: reject if jdMap.required is empty. */
@@ -121,7 +121,7 @@ describe('Stage 1 prerequisite gate', () => {
   })
 })
 
-// ─── Test 2: Stage 2 warning ───────────────────────────────────────────────────
+// â”€â”€â”€ Test 2: Stage 2 warning â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('Stage 2 completeness warning', () => {
   /** Mirrors the artifacts-page warning logic. */
@@ -148,14 +148,14 @@ describe('Stage 2 completeness warning', () => {
   })
 
   it('generation is still allowed when Stage 2 is incomplete (non-blocking)', () => {
-    // Stage 2 warning must not block the generate call — only warn
+    // Stage 2 warning must not block the generate call â€” only warn
     const stage1Valid = true
     const stage2Warning = true
     expect(stage1Valid && stage2Warning).toBe(true) // can still generate
   })
 })
 
-// ─── Test 3: Per-section persistence ──────────────────────────────────────────
+// â”€â”€â”€ Test 3: Per-section persistence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('per-section persistence isolation', () => {
   it('generating one section only updates that section in the map', () => {
@@ -173,7 +173,7 @@ describe('per-section persistence isolation', () => {
   })
 })
 
-// ─── Test 4: Refine Skills does not alter Summary ──────────────────────────────
+// â”€â”€â”€ Test 4: Refine Skills does not alter Summary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('section isolation during refinement', () => {
   it('refining Skills section does not change Summary section', () => {
@@ -195,7 +195,7 @@ describe('section isolation during refinement', () => {
   })
 })
 
-// ─── Test 5: Accepted sections are not overwritten ────────────────────────────
+// â”€â”€â”€ Test 5: Accepted sections are not overwritten â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('accepted section protection', () => {
   it('generateSection guard returns early for accepted section without instruction', () => {
@@ -219,7 +219,7 @@ describe('accepted section protection', () => {
   })
 })
 
-// ─── Test 6: Rejected sections are not export-ready ───────────────────────────
+// â”€â”€â”€ Test 6: Rejected sections are not export-ready â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('rejected section export exclusion', () => {
   it('isRejected returns true for rejected sections', () => {
@@ -246,7 +246,7 @@ describe('rejected section export exclusion', () => {
   })
 })
 
-// ─── Test 7: Evidence warnings for unsupported JD skills ──────────────────────
+// â”€â”€â”€ Test 7: Evidence warnings for unsupported JD skills â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('evidence warnings', () => {
   it('section with gap requirements has evidence warnings', () => {
@@ -267,7 +267,7 @@ describe('evidence warnings', () => {
   it('gap requirements in jdMap should produce evidence warnings (data contract)', () => {
     const gapRequirements = VALID_JD_MAP.required.filter(r => r.userCoverageStatus === 'gap')
     expect(gapRequirements.length).toBeGreaterThan(0)
-    // Each gap requirement should be flagged — this is enforced by the LLM prompt.
+    // Each gap requirement should be flagged â€” this is enforced by the LLM prompt.
     // Here we verify the data shape allows it.
     const mockWarnings = gapRequirements.map(
       r => `JD requires "${r.text}" but no profile evidence found.`
@@ -276,7 +276,7 @@ describe('evidence warnings', () => {
   })
 })
 
-// ─── Test 8: Rejected phrases not in generated content ────────────────────────
+// â”€â”€â”€ Test 8: Rejected phrases not in generated content â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('rejected phrase enforcement', () => {
   it('containsRejectedPhrase detects a phrase violation', () => {
@@ -303,7 +303,7 @@ describe('rejected phrase enforcement', () => {
   })
 })
 
-// ─── Test 9: Signal influence persisted ───────────────────────────────────────
+// â”€â”€â”€ Test 9: Signal influence persisted â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('signal influence persistence', () => {
   it('section with signal influence stores the summary string', () => {
@@ -331,7 +331,7 @@ describe('signal influence persistence', () => {
   })
 })
 
-// ─── Test 10: Manual edit preserves status correctly ──────────────────────────
+// â”€â”€â”€ Test 10: Manual edit preserves status correctly â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('manual edit behavior', () => {
   it('manual edit updates content without changing status', () => {
@@ -369,7 +369,7 @@ describe('manual edit behavior', () => {
   })
 })
 
-// ─── Role/source binding fixtures ─────────────────────────────────────────────
+// â”€â”€â”€ Role/source binding fixtures â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function makeWorkEntry(overrides: Partial<WorkEntry> & { title: string; company: string }): WorkEntry {
   return {
@@ -419,14 +419,14 @@ function makeBridgeQuestion(overrides: Partial<BridgeQuestion>): BridgeQuestion 
   }
 }
 
-const PO_ENTRY = makeWorkEntry({ title: 'Product Owner', company: 'Paylocity', domain: 'HCM' })
-const BA_ENTRY = makeWorkEntry({ title: 'Product Analyst', company: 'Paylocity', domain: 'HCM',
+const PO_ENTRY = makeWorkEntry({ title: 'Product Owner', company: 'SaaS Co', domain: 'HCM' })
+const BA_ENTRY = makeWorkEntry({ title: 'Product Analyst', company: 'SaaS Co', domain: 'HCM',
   bullets: ['Triaged 3,000+ Salesforce client requests and documented acceptance criteria'],
   approvedMetrics: ['3,000+ Salesforce client requests']
 })
-const QA_ENTRY = makeWorkEntry({ title: 'Lead QA Analyst', company: 'Paylocity', domain: 'HCM' })
+const QA_ENTRY = makeWorkEntry({ title: 'Lead QA Analyst', company: 'SaaS Co', domain: 'HCM' })
 
-// ─── Test 11: PO section scopes out PA-only Salesforce triage ──────────────────
+// â”€â”€â”€ Test 11: PO section scopes out PA-only Salesforce triage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('PO section evidence scoping', () => {
   it('PO scope puts PA entry in supportingWorkEntries, not primaryWorkEntries', () => {
@@ -452,7 +452,7 @@ describe('PO section evidence scoping', () => {
   })
 })
 
-// ─── Test 12: BA section scopes out PO-only Calendar Platform ownership ────────
+// â”€â”€â”€ Test 12: BA section scopes out PO-only Calendar Platform ownership â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('BA section evidence scoping', () => {
   it('BA scope puts PO entry in supportingWorkEntries, not primaryWorkEntries', () => {
@@ -472,7 +472,7 @@ describe('BA section evidence scoping', () => {
   })
 })
 
-// ─── Test 13: QA section scopes out PO Calendar Platform roadmap ───────────────
+// â”€â”€â”€ Test 13: QA section scopes out PO Calendar Platform roadmap â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('QA section evidence scoping', () => {
   it('QA scope puts PO and PA entries in supportingWorkEntries', () => {
@@ -497,7 +497,7 @@ describe('QA section evidence scoping', () => {
   })
 })
 
-// ─── Test 14: Professional Summary uses cross-role evidence ───────────────────
+// â”€â”€â”€ Test 14: Professional Summary uses cross-role evidence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('Professional Summary cross-role evidence', () => {
   it('summary scope puts all entries in primaryWorkEntries with no supporting split', () => {
@@ -510,7 +510,7 @@ describe('Professional Summary cross-role evidence', () => {
   })
 })
 
-// ─── Test 15: Skills section receives full evidence, no disallowed patterns ───
+// â”€â”€â”€ Test 15: Skills section receives full evidence, no disallowed patterns â”€â”€â”€
 
 describe('Skills section evidence scope', () => {
   it('skills scope includes all entries and no disallowed patterns', () => {
@@ -532,7 +532,7 @@ describe('Skills section evidence scope', () => {
   })
 })
 
-// ─── Test 16: DocuSign workflow answer is not uncertain ───────────────────────
+// â”€â”€â”€ Test 16: DocuSign workflow answer is not uncertain â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('bridge answer confidence classification', () => {
   it('DocuSign workflow answer yields high or medium confidence', () => {
@@ -547,22 +547,22 @@ describe('bridge answer confidence classification', () => {
   })
 })
 
-// ─── Test 17: Uncertainty answers cannot generate positive claims ─────────────
+// â”€â”€â”€ Test 17: Uncertainty answers cannot generate positive claims â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('uncertainty detection in bridge answers', () => {
-  it('"I\'m not sure" → none confidence', () => {
+  it('"I\'m not sure" â†’ none confidence', () => {
     expect(classifyBridgeAnswerConfidence("I'm not sure about that")).toBe('none')
   })
 
-  it('"Not sure" → none confidence', () => {
+  it('"Not sure" â†’ none confidence', () => {
     expect(classifyBridgeAnswerConfidence('Not sure, I may have done something similar')).toBe('none')
   })
 
-  it('"I don\'t know" → none confidence', () => {
+  it('"I don\'t know" â†’ none confidence', () => {
     expect(classifyBridgeAnswerConfidence("I don't know if that applies to me")).toBe('none')
   })
 
-  it('empty answer → none confidence', () => {
+  it('empty answer â†’ none confidence', () => {
     expect(classifyBridgeAnswerConfidence('')).toBe('none')
   })
 
@@ -591,7 +591,7 @@ describe('uncertainty detection in bridge answers', () => {
   })
 })
 
-// ─── Test 18: Insurance domain gap warning is global ─────────────────────────
+// â”€â”€â”€ Test 18: Insurance domain gap warning is global â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('global evidence warning classification', () => {
   it('insurance domain warning is classified as global', () => {
@@ -607,7 +607,7 @@ describe('global evidence warning classification', () => {
   })
 })
 
-// ─── Test 19: Non-domain warning remains section-specific ─────────────────────
+// â”€â”€â”€ Test 19: Non-domain warning remains section-specific â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('section-specific warning classification', () => {
   it('Salesforce gap is not a global warning', () => {
@@ -619,11 +619,11 @@ describe('section-specific warning classification', () => {
   })
 
   it('downgraded bullet warning is not a global warning', () => {
-    expect(isGlobalEvidenceWarning('Bullet downgraded — contains out-of-scope claim pattern for experience-po: "3,000+ salesforce"')).toBe(false)
+    expect(isGlobalEvidenceWarning('Bullet downgraded â€” contains out-of-scope claim pattern for experience-po: "3,000+ salesforce"')).toBe(false)
   })
 })
 
-// ─── Test 20: Source role separation is correct per section ──────────────────
+// â”€â”€â”€ Test 20: Source role separation is correct per section â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('work history source role separation', () => {
   it('each experience section correctly identifies its primary vs supporting entries', () => {
@@ -654,7 +654,7 @@ describe('work history source role separation', () => {
       ['experience-ba', makeSection({ type: 'experience-ba', status: 'generated', content: 'BA bullets draft' })],
     ])
 
-    // Simulate generating experience-ba — only that key changes
+    // Simulate generating experience-ba â€” only that key changes
     const newBA = makeSection({ type: 'experience-ba', content: 'BA bullets regenerated', version: 2 })
     const after = new Map(sections).set('experience-ba', newBA)
 
@@ -664,7 +664,7 @@ describe('work history source role separation', () => {
   })
 })
 
-// ─── Architecture-level claim validation helpers ───────────────────────────────
+// â”€â”€â”€ Architecture-level claim validation helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function makeBundleFor(sectionType: SectionType, workHistory: WorkEntry[], bridgeQs: BridgeQuestion[] = []) {
   return buildScopedEvidenceBundle(makeProfile(workHistory), bridgeQs, sectionType)
@@ -678,7 +678,7 @@ function makeRawBullet(
   return { text, claimStatus, sourceSignal: 'user-history' as const, evidenceRef }
 }
 
-// ─── Test 21: Claim from disallowed role is downgraded ────────────────────────
+// â”€â”€â”€ Test 21: Claim from disallowed role is downgraded â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('claim validator: disallowed role source', () => {
   it('a bullet whose evidenceRef resolves to a supporting (non-primary) entry is downgraded', () => {
@@ -686,7 +686,7 @@ describe('claim validator: disallowed role source', () => {
     const bullet = makeRawBullet(
       'Triaged 3,000+ Salesforce client requests.',
       'supported',
-      'Product Analyst at Paylocity'
+      'Product Analyst at SaaS Co'
     )
     const results = validateSectionClaims([bullet], bundle)
     expect(results[0].disposition).not.toBe('allowed')
@@ -700,7 +700,7 @@ describe('claim validator: disallowed role source', () => {
     const bullet = makeRawBullet(
       'Managed requirements and acceptance criteria for Salesforce integration.',
       'supported',
-      'Product Analyst at Paylocity'
+      'Product Analyst at SaaS Co'
     )
     const results = validateSectionClaims([bullet], bundle)
     expect(results[0].diagnostic).not.toBeNull()
@@ -710,7 +710,7 @@ describe('claim validator: disallowed role source', () => {
   })
 })
 
-// ─── Test 22: Claim from allowed role is preserved ────────────────────────────
+// â”€â”€â”€ Test 22: Claim from allowed role is preserved â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('claim validator: allowed role source', () => {
   it('a bullet whose evidenceRef resolves to a primary entry is allowed', () => {
@@ -718,7 +718,7 @@ describe('claim validator: allowed role source', () => {
     const bullet = makeRawBullet(
       'Owned backlog and sprint ceremonies for the Calendar Platform.',
       'supported',
-      'Product Owner at Paylocity'
+      'Product Owner at SaaS Co'
     )
     const results = validateSectionClaims([bullet], bundle)
     expect(results[0].disposition).toBe('allowed')
@@ -734,7 +734,7 @@ describe('claim validator: allowed role source', () => {
   })
 })
 
-// ─── Test 23: Cross-role claim with explicit framing is allowed ───────────────
+// â”€â”€â”€ Test 23: Cross-role claim with explicit framing is allowed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('claim validator: cross-role framing', () => {
   it('cross-role claim WITH prior-background framing is allowed (requires-framing)', () => {
@@ -742,7 +742,7 @@ describe('claim validator: cross-role framing', () => {
     const bullet = makeRawBullet(
       'Building on prior background as a Product Analyst, applied requirements expertise to PO backlog grooming.',
       'supported-with-reframing',
-      'Product Analyst at Paylocity'
+      'Product Analyst at SaaS Co'
     )
     const results = validateSectionClaims([bullet], bundle)
     expect(results[0].disposition).toBe('requires-framing')
@@ -754,7 +754,7 @@ describe('claim validator: cross-role framing', () => {
     const bullet = makeRawBullet(
       'Authored business requirements and managed acceptance criteria.',
       'supported',
-      'Product Analyst at Paylocity'
+      'Product Analyst at SaaS Co'
     )
     const results = validateSectionClaims([bullet], bundle)
     expect(results[0].disposition).toBe('downgraded')
@@ -762,7 +762,7 @@ describe('claim validator: cross-role framing', () => {
   })
 })
 
-// ─── Test 24: Bridge answer scoped to correct sections only ──────────────────
+// â”€â”€â”€ Test 24: Bridge answer scoped to correct sections only â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('bridge answer scope enforcement', () => {
   it('bridge answer for experience-po is not included in experience-ba bundle', () => {
@@ -774,7 +774,7 @@ describe('bridge answer scope enforcement', () => {
     })
     const bundle = makeBundleFor('experience-ba', [BA_ENTRY], [q])
     // experience-ba scope requires allowedBridgeQuestionTypes to include 'evidence'
-    // but crossRolePolicy='explicit-framing-required' → only 'experience-ba' or high-pri summary
+    // but crossRolePolicy='explicit-framing-required' â†’ only 'experience-ba' or high-pri summary
     const allBridgeIds = [
       ...bundle.normalizedBridgeEvidence.map(n => n.questionId),
       ...bundle.uncertainBridgeEvidence.map(n => n.questionId),
@@ -798,7 +798,7 @@ describe('bridge answer scope enforcement', () => {
   })
 })
 
-// ─── Test 25: Uncertainty answers land in uncertainBridgeEvidence ─────────────
+// â”€â”€â”€ Test 25: Uncertainty answers land in uncertainBridgeEvidence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('bridge answer normalization: uncertainty', () => {
   it('"I\'m not sure" answer is in uncertainBridgeEvidence, not normalizedBridgeEvidence', () => {
@@ -826,7 +826,7 @@ describe('bridge answer normalization: uncertainty', () => {
   })
 })
 
-// ─── Test 26: Unsupported claims blocked in skills section ────────────────────
+// â”€â”€â”€ Test 26: Unsupported claims blocked in skills section â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('claim validator: unsupported claims in skills section', () => {
   it('unsupported claim is blocked in skills section (skills disallows unsupported)', () => {
@@ -844,20 +844,20 @@ describe('claim validator: unsupported claims in skills section', () => {
   })
 })
 
-// ─── Test 27: Unsupported claims downgraded (not excluded) in experience sections
+// â”€â”€â”€ Test 27: Unsupported claims downgraded (not excluded) in experience sections
 
 describe('claim validator: unsupported in experience sections', () => {
-  it('unsupported claim in experience-po is NOT blocked — it surfaces for user review', () => {
+  it('unsupported claim in experience-po is NOT blocked â€” it surfaces for user review', () => {
     const bundle = makeBundleFor('experience-po', [PO_ENTRY])
     const bullet = makeRawBullet('Led enterprise Salesforce rollout.', 'unsupported', undefined)
     const results = validateSectionClaims([bullet], bundle)
-    // experience-po allows unsupported — should be 'allowed', not 'blocked'
+    // experience-po allows unsupported â€” should be 'allowed', not 'blocked'
     expect(results[0].disposition).toBe('allowed')
     expect(results[0].correctedClaimStatus).toBe('unsupported')
   })
 })
 
-// ─── Test 28: Disallowed pattern produces diagnostic with suggestedSection ────
+// â”€â”€â”€ Test 28: Disallowed pattern produces diagnostic with suggestedSection â”€â”€â”€â”€
 
 describe('claim validator: disallowed pattern diagnostic', () => {
   it('PO disallowed pattern produces diagnostic pointing toward experience-ba', () => {
@@ -865,7 +865,7 @@ describe('claim validator: disallowed pattern diagnostic', () => {
     const bullet = makeRawBullet(
       'Managed 3,000+ Salesforce client requests from enterprise HCM clients.',
       'supported',
-      'Product Analyst at Paylocity'
+      'Product Analyst at SaaS Co'
     )
     const results = validateSectionClaims([bullet], bundle)
     expect(results[0].disposition).toBe('downgraded')
@@ -881,7 +881,7 @@ describe('claim validator: disallowed pattern diagnostic', () => {
     const bullet = makeRawBullet(
       'Led product roadmap ownership for Calendar Platform delivery.',
       'supported',
-      'Product Owner at Paylocity'
+      'Product Owner at SaaS Co'
     )
     const results = validateSectionClaims([bullet], bundle)
     expect(results[0].disposition).toBe('downgraded')
@@ -889,7 +889,7 @@ describe('claim validator: disallowed pattern diagnostic', () => {
   })
 })
 
-// ─── Test 29: Global gap warnings are deduplicated across sections ─────────────
+// â”€â”€â”€ Test 29: Global gap warnings are deduplicated across sections â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('global gap warning deduplication', () => {
   it('insurance warning is classified as global', () => {
@@ -920,14 +920,14 @@ describe('global gap warning deduplication', () => {
   })
 })
 
-// ─── Test 30: Source mappings for allowed claims reference in-scope entries ───
+// â”€â”€â”€ Test 30: Source mappings for allowed claims reference in-scope entries â”€â”€â”€
 
 describe('source scope: allowed claims have in-scope source mappings', () => {
   it('only bullets with inScopeEntry=true contribute to clean source mappings', () => {
     const bundle = makeBundleFor('experience-po', [PO_ENTRY, BA_ENTRY])
     const bullets = [
-      makeRawBullet('Owned Calendar Platform backlog.', 'supported', 'Product Owner at Paylocity'),
-      makeRawBullet('Managed requirements.', 'supported', 'Product Analyst at Paylocity'),
+      makeRawBullet('Owned Calendar Platform backlog.', 'supported', 'Product Owner at SaaS Co'),
+      makeRawBullet('Managed requirements.', 'supported', 'Product Analyst at SaaS Co'),
     ]
     const results = validateSectionClaims(bullets, bundle)
     const inScope = results.filter(r => r.inScopeEntry)
@@ -951,7 +951,7 @@ describe('source scope: allowed claims have in-scope source mappings', () => {
   })
 })
 
-// ─── Bullet partitioning helpers ─────────────────────────────────────────────
+// â”€â”€â”€ Bullet partitioning helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 import { mapResultToPartition } from '@/lib/claim-validator'
 import type { BulletPartition } from '@/contracts'
@@ -962,12 +962,12 @@ function validateAndPartition(bullets: ReturnType<typeof makeRawBullet>[], secti
   return results.map(r => ({ ...r, partition: mapResultToPartition(r) }))
 }
 
-// ─── Test 31: PO claim does not appear in QA primary bullet list ───────────────
+// â”€â”€â”€ Test 31: PO claim does not appear in QA primary bullet list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('partition enforcement: wrong-role claims excluded from primary display', () => {
   it('a Product Owner sourced bullet is not in display partition of QA section', () => {
     const results = validateAndPartition(
-      [makeRawBullet('Owned Calendar Platform backlog and sprint ceremonies.', 'supported', 'Product Owner at Paylocity')],
+      [makeRawBullet('Owned Calendar Platform backlog and sprint ceremonies.', 'supported', 'Product Owner at SaaS Co')],
       'experience-qa',
       [PO_ENTRY, QA_ENTRY]
     )
@@ -978,7 +978,7 @@ describe('partition enforcement: wrong-role claims excluded from primary display
 
   it('a QA sourced bullet is not in display partition of PO section', () => {
     const results = validateAndPartition(
-      [makeRawBullet('Authored SpecFlow tests reducing regression defect rate by 40%.', 'supported', 'Lead QA Analyst at Paylocity')],
+      [makeRawBullet('Authored SpecFlow tests reducing regression defect rate by 40%.', 'supported', 'Lead QA Analyst at SaaS Co')],
       'experience-po',
       [PO_ENTRY, QA_ENTRY]
     )
@@ -987,7 +987,7 @@ describe('partition enforcement: wrong-role claims excluded from primary display
 
   it('a Product Analyst sourced bullet is not in display partition of PO section', () => {
     const results = validateAndPartition(
-      [makeRawBullet('Triaged 3,000+ Salesforce client requests.', 'supported', 'Product Analyst at Paylocity')],
+      [makeRawBullet('Triaged 3,000+ Salesforce client requests.', 'supported', 'Product Analyst at SaaS Co')],
       'experience-po',
       [PO_ENTRY, BA_ENTRY]
     )
@@ -995,15 +995,15 @@ describe('partition enforcement: wrong-role claims excluded from primary display
   })
 })
 
-// ─── Test 34: Cross-role claim with framing routes to needs-confirmation ───────
+// â”€â”€â”€ Test 34: Cross-role claim with framing routes to needs-confirmation â”€â”€â”€â”€â”€â”€â”€
 
-describe('partition enforcement: cross-role with framing → needs-confirmation', () => {
+describe('partition enforcement: cross-role with framing â†’ needs-confirmation', () => {
   it('prior-background framing produces needs-confirmation, not display', () => {
     const results = validateAndPartition(
       [makeRawBullet(
         'Building on prior background as a Business Analyst, applied requirements expertise to PO grooming.',
         'supported-with-reframing',
-        'Product Analyst at Paylocity'
+        'Product Analyst at SaaS Co'
       )],
       'experience-po',
       [PO_ENTRY, BA_ENTRY]
@@ -1012,20 +1012,20 @@ describe('partition enforcement: cross-role with framing → needs-confirmation'
   })
 })
 
-// ─── Test 35: needs-user-confirmation claim is not in display partition ────────
+// â”€â”€â”€ Test 35: needs-user-confirmation claim is not in display partition â”€â”€â”€â”€â”€â”€â”€â”€
 
-describe('partition enforcement: needs-user-confirmation → not display', () => {
+describe('partition enforcement: needs-user-confirmation â†’ not display', () => {
   it('a bullet with correctedClaimStatus=needs-user-confirmation goes to needs-confirmation partition', () => {
     const bundle = makeBundleFor('experience-po', [PO_ENTRY, BA_ENTRY])
-    // Bullet evidenceRef resolves to supporting entry (BA) without framing → downgraded to needs-user-confirmation
-    const bullet = makeRawBullet('Managed requirements and acceptance criteria.', 'supported', 'Product Analyst at Paylocity')
+    // Bullet evidenceRef resolves to supporting entry (BA) without framing â†’ downgraded to needs-user-confirmation
+    const bullet = makeRawBullet('Managed requirements and acceptance criteria.', 'supported', 'Product Analyst at SaaS Co')
     const results = validateSectionClaims([bullet], bundle)
     expect(results[0].correctedClaimStatus).toBe('needs-user-confirmation')
     expect(results[0].partition).not.toBe('display')
   })
 })
 
-// ─── Test 36: unsupported claim is not in display partition ───────────────────
+// â”€â”€â”€ Test 36: unsupported claim is not in display partition â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('partition enforcement: unsupported claims excluded', () => {
   it('a bullet with claimStatus=unsupported is blocked/excluded from skills section display', () => {
@@ -1038,15 +1038,15 @@ describe('partition enforcement: unsupported claims excluded', () => {
 
   it('an unsupported bullet in experience-po is excluded (not display)', () => {
     const bundle = makeBundleFor('experience-po', [PO_ENTRY])
-    const bullet = makeRawBullet('Led enterprise Salesforce rollout.', 'unsupported', 'Product Owner at Paylocity')
+    const bullet = makeRawBullet('Led enterprise Salesforce rollout.', 'unsupported', 'Product Owner at SaaS Co')
     const results = validateSectionClaims([bullet], bundle)
     // experience-po allows 'unsupported' in allowedClaimStatuses, but claimStatus=unsupported
-    // maps to 'excluded' via mapResultToPartition Rule (allowed + unsupported → excluded)
+    // maps to 'excluded' via mapResultToPartition Rule (allowed + unsupported â†’ excluded)
     expect(results[0].partition).toBe('excluded')
   })
 })
 
-// ─── Test 37: Accept only covers display-partition bullets ────────────────────
+// â”€â”€â”€ Test 37: Accept only covers display-partition bullets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('accept behavior: only display-partition bullets are accepted content', () => {
   it('section.content is reconstructed from display bullets only for bullet sections', () => {
@@ -1057,7 +1057,7 @@ describe('accept behavior: only display-partition bullets are accepted content',
 
     const allBullets = [displayBullet, confirmBullet, excludedBullet]
     const displayOnly = allBullets.filter(b => b.partition === 'display')
-    const reconstructedContent = displayOnly.map(b => `• ${b.text}`).join('\n')
+    const reconstructedContent = displayOnly.map(b => `â€¢ ${b.text}`).join('\n')
 
     expect(reconstructedContent).toContain('Calendar Platform sprint ceremonies')
     expect(reconstructedContent).not.toContain('prior BA background')
@@ -1078,13 +1078,13 @@ describe('accept behavior: only display-partition bullets are accepted content',
   })
 })
 
-// ─── Test 38: Export readiness ignores non-display claims ─────────────────────
+// â”€â”€â”€ Test 38: Export readiness ignores non-display claims â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('export readiness: non-display claims do not contribute to exported content', () => {
   it('only display-partition bullets contribute to the section content for export', () => {
     const bullets = [
-      makeRawBullet('Owned PO backlog.', 'supported', 'Product Owner at Paylocity'),
-      makeRawBullet('Prior background: applied BA skills.', 'supported-with-reframing', 'Product Analyst at Paylocity'),
+      makeRawBullet('Owned PO backlog.', 'supported', 'Product Owner at SaaS Co'),
+      makeRawBullet('Prior background: applied BA skills.', 'supported-with-reframing', 'Product Analyst at SaaS Co'),
     ]
     const bundle = makeBundleFor('experience-po', [PO_ENTRY, BA_ENTRY])
     const results = validateSectionClaims(bullets, bundle)
@@ -1092,21 +1092,21 @@ describe('export readiness: non-display claims do not contribute to exported con
     const displayCount = results.filter(r => r.partition === 'display').length
     const nonDisplayCount = results.filter(r => r.partition !== 'display').length
     expect(displayCount + nonDisplayCount).toBe(2)
-    // PO-sourced bullet → display; BA-sourced with framing → needs-confirmation
+    // PO-sourced bullet â†’ display; BA-sourced with framing â†’ needs-confirmation
     expect(displayCount).toBe(1)
     expect(nonDisplayCount).toBe(1)
   })
 })
 
-// ─── Test 39: Display partition is distinct from all other partitions ──────────
+// â”€â”€â”€ Test 39: Display partition is distinct from all other partitions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('partition distinctness: display and non-display are mutually exclusive', () => {
   it('a bullet cannot be in both display and any other partition', () => {
     const results = validateAndPartition(
       [
-        makeRawBullet('Owned PO backlog.', 'supported', 'Product Owner at Paylocity'),
-        makeRawBullet('Led product roadmap ownership for Calendar Platform.', 'supported', 'Product Owner at Paylocity'),
-        makeRawBullet('Triaged Salesforce requests.', 'supported', 'Product Analyst at Paylocity'),
+        makeRawBullet('Owned PO backlog.', 'supported', 'Product Owner at SaaS Co'),
+        makeRawBullet('Led product roadmap ownership for Calendar Platform.', 'supported', 'Product Owner at SaaS Co'),
+        makeRawBullet('Triaged Salesforce requests.', 'supported', 'Product Analyst at SaaS Co'),
         makeRawBullet('Unsupported insurance claim.', 'unsupported', undefined),
       ],
       'experience-po',
@@ -1127,7 +1127,7 @@ describe('partition distinctness: display and non-display are mutually exclusive
   })
 })
 
-// ─── Test 40: Accepted sections elsewhere are preserved on regeneration ────────
+// â”€â”€â”€ Test 40: Accepted sections elsewhere are preserved on regeneration â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('partition: accepted section preservation during peer regeneration', () => {
   it('regenerating experience-ba does not change the partition of accepted experience-po bullets', () => {
@@ -1153,3 +1153,4 @@ describe('partition: accepted section preservation during peer regeneration', ()
     expect(after.get('experience-po')!.status).toBe('accepted')
   })
 })
+

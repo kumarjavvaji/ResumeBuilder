@@ -113,7 +113,7 @@ ${JSON.stringify(fitAnalysis, null, 2)}`
     system: `You generate targeted bridge questions that close the gap between a job description and a candidate's resume.
 
 Rules:
-- Questions must be specific and answerable. Not "tell me about your experience" but "Can you quantify the number of user stories you managed per sprint at Paylocity?"
+- Questions must be specific and answerable. Not "tell me about your experience" but "Can you quantify the number of user stories you managed per sprint at your current employer?"
 - Do NOT ask for facts already present in the profile provided.
 - Each question must name the specific gap, skill, or evidence it targets.
 - Each question must state which resume section it affects (summary, experience-po, experience-ba, experience-qa, skills, etc.).

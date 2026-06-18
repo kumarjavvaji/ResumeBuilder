@@ -62,6 +62,24 @@ export async function refineFullResumeExport(opts: FullResumeRefineOptions): Pro
     strategyBrief,
   } = opts
 
+  // Derive older/irrelevant employers from profile — replaces hardcoded employer names in gate
+  const primaryKeywords = ['product owner', 'product manager', 'business analyst',
+    'product analyst', 'systems analyst', 'data analyst', 'qa', 'quality']
+  const jdText = [...jdMap.required, ...jdMap.niceToHave].map(r => r.text).join(' ').toLowerCase()
+  const seen = new Set<string>()
+  const olderEmployersToExclude: string[] = []
+  for (const w of profile.workHistory) {
+    if (seen.has(w.company)) continue
+    const isPrimary = primaryKeywords.some(kw => w.title.toLowerCase().includes(kw))
+    if (isPrimary) { seen.add(w.company); continue }
+    const domain = (w.domain ?? '').toLowerCase()
+    const domainWords = domain.split(/\W+/).filter(word => word.length > 3)
+    if (!domainWords.some(word => jdText.includes(word))) {
+      olderEmployersToExclude.push(w.company)
+      seen.add(w.company)
+    }
+  }
+
   const systemPrompt = buildFullRefineSystemPrompt({
     emphasis, roleTitle, company,
     rejectedPhrases, acceptedSignals, globalSignals,
@@ -69,6 +87,7 @@ export async function refineFullResumeExport(opts: FullResumeRefineOptions): Pro
     calibrationSummary,
     contract,
     strategyBrief,
+    olderEmployersToExclude,
   })
 
   const userContent = buildFullRefineUserContent({
@@ -121,10 +140,11 @@ interface SystemOpts {
   calibrationSummary?: CalibrationSummary
   contract?: ResumeGenerationContract
   strategyBrief?: ResumeStrategyBrief
+  olderEmployersToExclude?: string[]
 }
 
 function buildFullRefineSystemPrompt(opts: SystemOpts): string {
-  const { emphasis, roleTitle, company, rejectedPhrases, acceptedSignals, globalSignals, constraints, calibrationSummary, contract, strategyBrief } = opts
+  const { emphasis, roleTitle, company, rejectedPhrases, acceptedSignals, globalSignals, constraints, calibrationSummary, contract, strategyBrief, olderEmployersToExclude } = opts
 
   const targetLine = [roleTitle, company].filter(Boolean).join(' at ')
 
@@ -155,7 +175,7 @@ function buildFullRefineSystemPrompt(opts: SystemOpts): string {
       }`
     : ''
 
-  const qualityGate = buildFullResumeQualityGate()
+  const qualityGate = buildFullResumeQualityGate(olderEmployersToExclude?.length ? { olderEmployersToExclude } : undefined)
   const contractBlock = contract ? serializeContractForPrompt(contract) : ''
   const strategyBriefBlock = serializeResumeStrategyBriefForPrompt(strategyBrief)
 

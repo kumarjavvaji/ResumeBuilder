@@ -310,7 +310,7 @@ function deriveArtifactStrategy(
           '"early career includes"',
           '"grounding operational context"',
           '"grounding data pipeline context"',
-          'GAINSystems (exclude unless JD requires supply chain/CPG/operations domain)',
+          'older employers not relevant to this JD',
           '"With a decade of..."',
           '"Background includes..."',
           ...unsupportedGaps.slice(0, 3),

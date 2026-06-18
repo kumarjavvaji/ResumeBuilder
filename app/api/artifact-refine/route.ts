@@ -4,6 +4,7 @@ import type {
   SectionType, JDRequirementMap, UserProfile, BridgeQuestion,
   LearningSignal, EmphasisCategory, CalibrationSummary, ArtifactVersion
 } from '@/contracts'
+import type { FitAnalysisContext, CalibrationRefSlim } from '@/lib/artifacts/buildArtifactRefinementContext'
 
 export async function POST(req: NextRequest) {
   try {
@@ -27,6 +28,8 @@ export async function POST(req: NextRequest) {
       overallRefinementPrompt?: string
       roleTitle?: string
       company?: string
+      fitAnalysisContext?: FitAnalysisContext
+      calibrationRefs?: CalibrationRefSlim[]
     }
 
     if (!body.jdMap?.required?.length) {
@@ -70,6 +73,8 @@ export async function POST(req: NextRequest) {
       overallRefinementPrompt: body.overallRefinementPrompt,
       roleTitle: body.roleTitle,
       company: body.company,
+      fitAnalysisContext: body.fitAnalysisContext,
+      calibrationRefs: body.calibrationRefs,
     })
 
     return NextResponse.json(result)

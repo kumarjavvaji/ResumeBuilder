@@ -11,6 +11,7 @@ import type {
   RefinementLearningSignal,
   RefinementEvidenceBoundary,
 } from '@/contracts'
+import type { FitAnalysisContext, CalibrationRefSlim } from '@/lib/artifacts/buildArtifactRefinementContext'
 import { nanoid } from '@/lib/storage/nanoid'
 import { buildScopedEvidenceBundle } from '@/lib/evidence-scope'
 import {
@@ -49,6 +50,9 @@ export interface RefineOptions {
   roleTitle?: string
   /** Target company name — included in the brief for contextual framing. */
   company?: string
+  // Stage 3B enrichment: fit intelligence and calibration context assembled client-side
+  fitAnalysisContext?: FitAnalysisContext
+  calibrationRefs?: CalibrationRefSlim[]
 }
 
 export interface RefinementResult {
@@ -70,6 +74,7 @@ export async function refineResumeArtifact(opts: RefineOptions): Promise<Refinem
     calibrationSummary, priorVersions = [],
     overallRefinementPrompt,
     roleTitle = '', company = '',
+    fitAnalysisContext, calibrationRefs,
   } = opts
 
   const bundle = buildScopedEvidenceBundle(profile, answeredQuestions, sectionType)
@@ -99,6 +104,7 @@ export async function refineResumeArtifact(opts: RefineOptions): Promise<Refinem
     companySummary, fitHypothesis, riskGaps,
     priorVersions,
     overallRefinementPrompt,
+    fitAnalysisContext, calibrationRefs,
   })
 
   const response = await anthropic.messages.create({
@@ -268,6 +274,8 @@ interface BuildContentOpts {
   riskGaps?: string[]
   priorVersions: Pick<ArtifactVersion, 'versionNumber' | 'userInstruction' | 'revisedText'>[]
   overallRefinementPrompt?: string
+  fitAnalysisContext?: FitAnalysisContext
+  calibrationRefs?: CalibrationRefSlim[]
 }
 
 function buildRefineUserContent(opts: BuildContentOpts): string {
@@ -277,6 +285,7 @@ function buildRefineUserContent(opts: BuildContentOpts): string {
     companySummary, fitHypothesis, riskGaps,
     priorVersions,
     overallRefinementPrompt,
+    fitAnalysisContext, calibrationRefs,
   } = opts
 
   const lines: string[] = [`Refine section: ${sectionType}`, '']
@@ -352,6 +361,7 @@ function buildRefineUserContent(opts: BuildContentOpts): string {
   if (bundle.normalizedBridgeEvidence.length > 0) {
     lines.push('Bridge evidence (scoped for this section):')
     for (const n of bundle.normalizedBridgeEvidence) {
+      lines.push(`  Q [${n.questionType}]: "${n.originalQuestion}"`)
       lines.push(`  Evidence: ${n.normalizedEvidenceStatement}`)
       if (n.forbiddenOverclaim.length > 0) {
         lines.push(`  Forbidden overclaim: do NOT claim ${n.forbiddenOverclaim.join('; ')}`)
@@ -369,6 +379,94 @@ function buildRefineUserContent(opts: BuildContentOpts): string {
       lines.push(`  [User expressed uncertainty] ${n.normalizedEvidenceStatement}`)
     }
     lines.push('')
+  }
+
+  // ── Fit analysis context (per-requirement assessment from Stage 1) ─────────
+  if (fitAnalysisContext) {
+    if (fitAnalysisContext.requirements.length > 0) {
+      lines.push('Fit analysis per requirement (Stage 1 assessment — use to prioritize and calibrate framing):')
+      for (const r of fitAnalysisContext.requirements) {
+        lines.push(`  Requirement: ${r.requirementText}`)
+        if (r.classification) lines.push(`    Classification: ${r.classification}`)
+        if (r.profileEvidenceStrength) lines.push(`    Evidence strength: ${r.profileEvidenceStrength}`)
+        if (r.quickDiqGrounding) lines.push(`    Quick-DIQ grounding: ${r.quickDiqGrounding}`)
+        if (r.calibratedFitInterpretation) lines.push(`    Calibrated interpretation: ${r.calibratedFitInterpretation}`)
+      }
+      lines.push('')
+    }
+
+    const gs = fitAnalysisContext.gapSummary
+    if (gs) {
+      if (gs.trueGaps.length) {
+        lines.push('True gaps (no evidence — handle honestly, do not fabricate):')
+        for (const g of gs.trueGaps) lines.push(`  - ${g}`)
+        lines.push('')
+      }
+      if (gs.needsConfirmation.length) {
+        lines.push('Needs confirmation (weak or inferred evidence):')
+        for (const g of gs.needsConfirmation) lines.push(`  - ${g}`)
+        lines.push('')
+      }
+      if (gs.wordingOrMapping.length) {
+        lines.push('Wording/mapping gaps (candidate has the experience but terms differ):')
+        for (const g of gs.wordingOrMapping) lines.push(`  - ${g}`)
+        lines.push('')
+      }
+    }
+
+    const cb = fitAnalysisContext.calibrationBrief
+    if (cb) {
+      lines.push('Quick-DIQ context (company/domain signals from Stage 1):')
+      if (cb.companyContext) lines.push(`  Company context: ${cb.companyContext}`)
+      if (cb.domainContext) lines.push(`  Domain context: ${cb.domainContext}`)
+      if (cb.roleProblemSpace) lines.push(`  Role problem space: ${cb.roleProblemSpace}`)
+      if (cb.likelyHiringPriorities?.length) lines.push(`  Hiring priorities: ${cb.likelyHiringPriorities.join(', ')}`)
+      if (cb.deliverySignals?.length) {
+        lines.push('  Delivery signals:')
+        for (const s of cb.deliverySignals) lines.push(`    - ${s}`)
+      }
+      if (cb.stakeholderSignals?.length) {
+        lines.push('  Stakeholder signals:')
+        for (const s of cb.stakeholderSignals) lines.push(`    - ${s}`)
+      }
+      if (cb.analyticsReportingSignals?.length) {
+        lines.push('  Analytics/reporting signals:')
+        for (const s of cb.analyticsReportingSignals) lines.push(`    - ${s}`)
+      }
+      if (cb.resumeCalibrationImplications?.length) {
+        lines.push('  Resume calibration implications:')
+        for (const s of cb.resumeCalibrationImplications) lines.push(`    - ${s}`)
+      }
+      lines.push('')
+    }
+  }
+
+  // ── Applied calibration refs (individual market peers, strategy only) ───────
+  if (calibrationRefs && calibrationRefs.length > 0) {
+    const activeRefs = calibrationRefs.filter(r => r.calibrationGroup !== 'rejected')
+    if (activeRefs.length > 0) {
+      lines.push('Applied calibration references (market benchmarks — NOT user evidence; never cite in the artifact):')
+      for (const ref of activeRefs) {
+        const refType = ref.matchType === 'target_company' ? 'target company' : 'comparable'
+        const group = ref.calibrationGroup ?? 'supporting'
+        lines.push(`  [${refType}/${group}] ${ref.title} at ${ref.company} (confidence: ${ref.confidence})`)
+        lines.push(`    Match reason: ${ref.matchReason}`)
+        if (ref.limitations) lines.push(`    Limitation: ${ref.limitations}`)
+        if (ref.manualContext) {
+          lines.push(`    Manually enriched profile context (calibration reference only — do NOT treat as user evidence):`)
+          lines.push(`      ${ref.manualContext.slice(0, 600)}${ref.manualContext.length > 600 ? '…' : ''}`)
+        }
+        if (group === 'primary') {
+          lines.push(`    Calibration use: voice/framing, keyword emphasis, and seniority language — full calibration use permitted.`)
+        } else if (group === 'supporting') {
+          lines.push(`    Calibration use: domain vocabulary and workflow framing only — do NOT use for title or seniority claims.`)
+        } else if (group === 'context_only') {
+          lines.push(`    Calibration use: company/domain background only — do NOT use to shape candidate seniority, title wording, or skill claims.`)
+        }
+      }
+      lines.push('BOUNDARY: Use these only to calibrate language, emphasis, and role framing. Never cite company names, people, or match reasons inside the artifact.')
+      lines.push('')
+    }
   }
 
   return lines.join('\n')

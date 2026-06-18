@@ -1,5 +1,5 @@
-/**
- * Calibration pipeline tests — pure logic, no LLM calls, no IndexedDB.
+﻿/**
+ * Calibration pipeline tests â€” pure logic, no LLM calls, no IndexedDB.
  *
  * Coverage:
  * 1.  Partial refs persist after one candidate succeeds
@@ -10,7 +10,7 @@
  * 6.  Apply partial calibration enabled at threshold (3 target OR 3 comparable)
  * 7.  Apply partial calibration disabled below threshold
  * 8.  Skip calibration works while queue exists
- * 9.  Synthesis tool has no web_search tool — consumes refs only
+ * 9.  Synthesis tool has no web_search tool â€” consumes refs only
  * 10. Accepted artifact sections are not regenerated after calibration refresh
  * 11. Loading state clears on enrichment failure
  * 12. getEnrichedRefsFromCandidates returns only enriched candidates
@@ -43,7 +43,7 @@ import type {
 } from '@/contracts'
 import { nanoid } from '@/lib/storage/nanoid'
 
-// ─── Fixtures ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Fixtures â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function makeCandidate(overrides: Partial<CalibrationCandidate> = {}): CalibrationCandidate {
   return {
@@ -98,7 +98,7 @@ function makeRef(overrides: Partial<CalibrationReference> = {}): CalibrationRefe
   }
 }
 
-// ─── 1–2: Partial persistence and failure isolation ───────────────────────────
+// â”€â”€â”€ 1â€“2: Partial persistence and failure isolation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('processEnrichmentQueue', () => {
   it('(1) partial refs persist after one candidate succeeds', async () => {
@@ -119,7 +119,7 @@ describe('processEnrichmentQueue', () => {
     expect(enriched[0].enrichedRef).toBeDefined()
   })
 
-  it('(2) failed candidate does not fail the run — all candidates processed', async () => {
+  it('(2) failed candidate does not fail the run â€” all candidates processed', async () => {
     const candidates = [
       makeCandidate({ id: 'c1' }),
       makeCandidate({ id: 'c2' }),
@@ -142,7 +142,7 @@ describe('processEnrichmentQueue', () => {
     expect(results.find(c => c.id === 'c3')?.status).toBe('enriched')
   })
 
-  it('(11) loading state (enriching → failed) clears on failure — no stale enriching status', async () => {
+  it('(11) loading state (enriching â†’ failed) clears on failure â€” no stale enriching status', async () => {
     const c = makeCandidate({ id: 'c1' })
     const updates: CandidateStatus[] = []
     const enrichFn = async (_c: CalibrationCandidate): Promise<CalibrationCandidate> => {
@@ -154,7 +154,7 @@ describe('processEnrichmentQueue', () => {
       onCandidateUpdate: updated => updates.push(updated.status)
     })
 
-    // Must transition enriching → failed, never stay 'enriching'
+    // Must transition enriching â†’ failed, never stay 'enriching'
     expect(updates).toContain('enriching')
     expect(updates[updates.length - 1]).toBe('failed')
   })
@@ -218,7 +218,7 @@ describe('processEnrichmentQueue', () => {
   })
 })
 
-// ─── 3–4: Dedup ───────────────────────────────────────────────────────────────
+// â”€â”€â”€ 3â€“4: Dedup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('dedupeCandidates', () => {
   it('(3) deduplicates by URL', () => {
@@ -255,7 +255,7 @@ describe('dedupeCandidates', () => {
   })
 })
 
-// ─── 5: Gated URL detection ───────────────────────────────────────────────────
+// â”€â”€â”€ 5: Gated URL detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('gated URL detection', () => {
   it('(5) LinkedIn URL is detected as gated', () => {
@@ -284,7 +284,7 @@ describe('gated URL detection', () => {
   })
 })
 
-// ─── 6–8: Threshold and skip ──────────────────────────────────────────────────
+// â”€â”€â”€ 6â€“8: Threshold and skip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('thresholds', () => {
   it('(6) min threshold met with 3 target refs', () => {
@@ -305,7 +305,7 @@ describe('thresholds', () => {
     expect(isMinThresholdMet(refs)).toBe(false)
   })
 
-  it('(8) skip calibration does not require empty queue — it is a UI intent signal only', () => {
+  it('(8) skip calibration does not require empty queue â€” it is a UI intent signal only', () => {
     // The skip behavior is controlled in UI state, not in pipeline logic.
     // This test verifies that isMinThresholdMet doesn't care about queued candidates.
     const refs = Array.from({ length: 3 }, () => makeRef({ matchType: 'target_company' }))
@@ -345,8 +345,8 @@ describe('thresholds', () => {
   })
 })
 
-// ─── 9: Synthesis has no web search ──────────────────────────────────────────
-// Verified by reading the source file directly — synthesize-calibration must not
+// â”€â”€â”€ 9: Synthesis has no web search â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Verified by reading the source file directly â€” synthesize-calibration must not
 // include 'web_search_20250305' or 'betas' in its tool list.
 // This is enforced as a code convention checked in the file content.
 
@@ -365,7 +365,7 @@ describe('synthesis isolation', () => {
   })
 })
 
-// ─── 10: Accepted sections protected ─────────────────────────────────────────
+// â”€â”€â”€ 10: Accepted sections protected â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('accepted section protection', () => {
   it('(10) accepted section status does not change when calibration updates', () => {
@@ -375,12 +375,12 @@ describe('accepted section protection', () => {
       status === 'accepted' && !refinementInstruction
 
     expect(isAcceptedGuard('accepted')).toBe(true)          // blocked
-    expect(isAcceptedGuard('accepted', 'Rewrite this.')).toBe(false)  // explicit instruction → allowed
-    expect(isAcceptedGuard('generated')).toBe(false)        // not accepted → not blocked
+    expect(isAcceptedGuard('accepted', 'Rewrite this.')).toBe(false)  // explicit instruction â†’ allowed
+    expect(isAcceptedGuard('generated')).toBe(false)        // not accepted â†’ not blocked
   })
 })
 
-// ─── 12–13: getEnrichedRefsFromCandidates + mechanicalEnrich ─────────────────
+// â”€â”€â”€ 12â€“13: getEnrichedRefsFromCandidates + mechanicalEnrich â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('candidate utilities', () => {
   it('(12) getEnrichedRefsFromCandidates returns only enriched candidates', () => {
@@ -400,7 +400,7 @@ describe('candidate utilities', () => {
     const c = makeCandidate({
       id: 'test-id',
       title: 'Implementation Analyst',
-      company: 'OIP Insurtech',
+      company: 'Reference Insurer Inc',
       sourceUrl: 'https://linkedin.com/in/someone',
       discoverySnippet: 'Works on business systems.',
       roughMatchReason: 'Adjacent role at target company.',
@@ -412,9 +412,9 @@ describe('candidate utilities', () => {
 
     expect(ref.id).toBe('test-id')
     expect(ref.title).toBe('Implementation Analyst')
-    expect(ref.company).toBe('OIP Insurtech')
+    expect(ref.company).toBe('Reference Insurer Inc')
     expect(ref.matchType).toBe('target_company')
-    expect(ref.confidence).toBe('low') // LinkedIn → gated → low
+    expect(ref.confidence).toBe('low') // LinkedIn â†’ gated â†’ low
     expect(ref.limitations).toContain('gated')
     expect(ref.snippetOrSummary).toBe('Works on business systems.')
     expect(ref.relevanceScore).toBeGreaterThan(0)
@@ -431,3 +431,4 @@ describe('candidate utilities', () => {
     expect(ref.limitations).toBeUndefined()
   })
 })
+

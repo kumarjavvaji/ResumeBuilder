@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { Spinner } from '@/components/shared/spinner'
 import {
   dedupeCandidates,
+  dedupeRefs,
   getEnrichedRefsFromCandidates,
   isMinThresholdMet,
   isIdealThresholdMet,
@@ -40,6 +41,7 @@ interface CalibrationPanelProps {
   targetCompany: string
   roleTitle: string
   jdSummary?: string
+  jdText?: string
   onCalibrationApplied: (summary: CalibrationSummary, appliedState: AppliedCalibrationState) => void
   onSkip: () => void
 }
@@ -74,6 +76,28 @@ function MatchBadge({ matchType }: { matchType: CalibrationReference['matchType'
   return <span className={`text-xs px-1.5 py-0.5 rounded border ${cls}`}>{label}</span>
 }
 
+function CalibrationGroupBadge({ group }: { group: CalibrationReference['calibrationGroup'] }) {
+  if (!group) return null
+  const map: Record<NonNullable<CalibrationReference['calibrationGroup']>, { label: string; cls: string }> = {
+    primary: { label: 'Primary', cls: 'text-green-400 bg-green-950/40 border-green-800/50' },
+    supporting: { label: 'Supporting', cls: 'text-blue-300 bg-blue-950/40 border-blue-800/50' },
+    context_only: { label: 'Context only', cls: 'text-amber-400 bg-amber-950/40 border-amber-800/50' },
+    rejected: { label: 'Rejected', cls: 'text-gray-500 bg-gray-800/60 border-gray-700' },
+  }
+  const { label, cls } = map[group]
+  return <span className={`text-xs px-1.5 py-0.5 rounded border ${cls}`}>{label}</span>
+}
+
+function SourceDepthBadge({ depth }: { depth: CalibrationReference['sourceDepth'] }) {
+  if (!depth) return null
+  const map: Record<NonNullable<CalibrationReference['sourceDepth']>, string> = {
+    rich: 'text-green-500',
+    moderate: 'text-gray-400',
+    shallow: 'text-gray-600',
+  }
+  return <span className={`text-xs ${map[depth]}`}>{depth}</span>
+}
+
 function CandidateStatusChip({ status }: { status: CandidateStatus }) {
   const map: Record<CandidateStatus, { label: string; cls: string }> = {
     queued: { label: 'Queued', cls: 'text-gray-500 border-gray-700' },
@@ -90,10 +114,59 @@ function CandidateStatusChip({ status }: { status: CandidateStatus }) {
 
 // ─── Ref card ────────────────────────────────────────────────────────────────
 
-function RefCard({ ref: r, onRemove }: { ref: CalibrationReference; onRemove: () => void }) {
+function RefCard({
+  ref: r,
+  onRemove,
+  onUpdate,
+  onReclassify,
+}: {
+  ref: CalibrationReference
+  onRemove: () => void
+  onUpdate: (updated: CalibrationReference) => void
+  onReclassify?: (ref: CalibrationReference, manualContext: string) => Promise<void>
+}) {
   const [expanded, setExpanded] = useState(false)
+  const [pasteOpen, setPasteOpen] = useState(false)
+  const [manualCtx, setManualCtx] = useState(r.manualContext ?? '')
+  const [saving, setSaving] = useState(false)
+  const [reclassifying, setReclassifying] = useState(false)
+
+  const displayUrl = r.sourceUrl ?? r.profileUrl
+  let sourceDomain: string | null = null
+  try {
+    if (displayUrl) sourceDomain = new URL(displayUrl).hostname.replace(/^www\./, '')
+  } catch { /* invalid URL — show nothing */ }
+
+  async function handleSaveManualContext(valueOverride?: unknown) {
+    setSaving(true)
+    const rawText = typeof valueOverride === 'string' ? valueOverride : (manualCtx ?? '')
+    const trimmed = rawText.trim()
+    const updated: CalibrationReference = {
+      ...r,
+      manualContext: trimmed || undefined,
+      manualContextUpdatedAt: new Date().toISOString(),
+      referenceDepth: trimmed ? 'manual_enriched' : 'snippet_only',
+      enrichmentSource: trimmed ? 'user_pasted' : undefined,
+    }
+    await upsertCalibrationReference(updated)
+    onUpdate(updated)
+    setSaving(false)
+    if (trimmed) {
+      setPasteOpen(false)
+      // Re-classify with richer context if handler is available
+      if (onReclassify && trimmed) {
+        setReclassifying(true)
+        try {
+          await onReclassify(updated, trimmed)
+        } finally {
+          setReclassifying(false)
+        }
+      }
+    }
+  }
+
   return (
-    <div className="border border-gray-700 rounded-md px-3 py-2 space-y-1 bg-gray-900/40">
+    <div className="border border-gray-700 rounded-md px-3 py-2 space-y-1.5 bg-gray-900/40">
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 flex-wrap min-w-0">
           <span className="text-sm font-medium text-white truncate">
@@ -101,16 +174,104 @@ function RefCard({ ref: r, onRemove }: { ref: CalibrationReference; onRemove: ()
           </span>
           <span className="text-xs text-gray-400 shrink-0">{r.company}</span>
           <MatchBadge matchType={r.matchType} />
+          <CalibrationGroupBadge group={r.calibrationGroup} />
           <ConfidenceBadge confidence={r.confidence} />
+          {r.sourceDepth && <SourceDepthBadge depth={r.sourceDepth} />}
+          {r.referenceDepth === 'manual_enriched' && (
+            <span className="text-xs text-blue-400 border border-blue-800/50 rounded px-1.5 py-0.5">
+              Manual context added
+            </span>
+          )}
+          {reclassifying && <span className="text-xs text-blue-400">Re-classifying…</span>}
         </div>
         <button onClick={onRemove} className="shrink-0 text-xs text-gray-700 hover:text-red-400 mt-0.5">✕</button>
       </div>
+
       <p className="text-xs text-gray-400 italic">{r.matchReason}</p>
-      {r.limitations && <p className="text-xs text-amber-600">⚠ {r.limitations}</p>}
-      <button onClick={() => setExpanded(v => !v)} className="text-xs text-gray-600 hover:text-gray-400">
-        {expanded ? 'Hide snippet ↑' : 'Show snippet ↓'}
-      </button>
-      {expanded && <p className="text-xs text-gray-500 whitespace-pre-wrap border-t border-gray-800 pt-1">{r.snippetOrSummary}</p>}
+      {r.riskNote && <p className="text-xs text-amber-500">⚠ {r.riskNote}</p>}
+      {r.limitations && <p className="text-xs text-amber-600/70">⚠ {r.limitations}</p>}
+
+      {/* JD alignment + use guidance */}
+      {r.jdAlignmentElements && r.jdAlignmentElements.length > 0 && (
+        <p className="text-xs text-gray-500">Aligns with: {r.jdAlignmentElements.join(', ')}</p>
+      )}
+      {r.useFor && r.useFor.length > 0 && (
+        <p className="text-xs text-green-700">Use for: {r.useFor.join(' · ')}</p>
+      )}
+      {r.doNotUseFor && r.doNotUseFor.length > 0 && (
+        <p className="text-xs text-red-800/70">Do not use for: {r.doNotUseFor.join(' · ')}</p>
+      )}
+
+      {/* Source / profile link */}
+      {displayUrl ? (
+        <a
+          href={displayUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300"
+        >
+          Open profile ↗{sourceDomain ? <span className="text-gray-600">({sourceDomain})</span> : null}
+        </a>
+      ) : (
+        <span className="text-xs text-gray-700">No source link available</span>
+      )}
+
+      {/* Action row */}
+      <div className="flex items-center gap-3 pt-0.5">
+        <button
+          onClick={() => setExpanded(v => !v)}
+          className="text-xs text-gray-600 hover:text-gray-400"
+        >
+          {expanded ? 'Hide snippet ↑' : 'Show snippet ↓'}
+        </button>
+        <button
+          onClick={() => setPasteOpen(v => !v)}
+          className="text-xs text-gray-600 hover:text-gray-400"
+        >
+          {pasteOpen ? 'Cancel ↑' : (r.referenceDepth === 'manual_enriched' ? 'Edit pasted context ↓' : 'Paste copied profile context ↓')}
+        </button>
+      </div>
+
+      {expanded && (
+        <p className="text-xs text-gray-500 whitespace-pre-wrap border-t border-gray-800 pt-1">
+          {r.snippetOrSummary}
+        </p>
+      )}
+
+      {/* Manual context paste area */}
+      {pasteOpen && (
+        <div className="space-y-2 pt-1 border-t border-gray-800">
+          <p className="text-xs text-gray-500">
+            Paste public profile text (headline, About, role description, bio).{' '}
+            <span className="text-gray-600">Used for calibration only — not treated as your experience.</span>
+          </p>
+          <textarea
+            value={manualCtx}
+            onChange={e => setManualCtx(e.target.value)}
+            placeholder="Paste copied profile context here…"
+            rows={4}
+            className="w-full text-xs bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-white placeholder-gray-600 focus:outline-none focus:border-gray-500 resize-none"
+          />
+          <div className="flex gap-2 items-center">
+            <button
+              onClick={() => void handleSaveManualContext()}
+              disabled={saving || reclassifying}
+              className="text-xs px-3 py-1 bg-blue-900/50 text-blue-300 border border-blue-800/50 rounded hover:bg-blue-900 disabled:opacity-40"
+            >
+              {saving ? 'Saving…' : reclassifying ? 'Re-classifying…' : 'Save context'}
+            </button>
+            {r.referenceDepth === 'manual_enriched' && (
+              <button
+                onClick={() => { setManualCtx(''); void handleSaveManualContext('') }}
+                disabled={saving || reclassifying}
+                className="text-xs text-gray-600 hover:text-gray-400 disabled:opacity-40"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -300,6 +461,7 @@ export function CalibrationPanel({
   targetCompany,
   roleTitle,
   jdSummary,
+  jdText,
   onCalibrationApplied,
   onSkip
 }: CalibrationPanelProps) {
@@ -310,6 +472,7 @@ export function CalibrationPanel({
   const [appliedState, setAppliedState] = useState<AppliedCalibrationState | undefined>()
   const [diagnostics, setDiagnostics] = useState<CalibrationDiagnostic[]>([])
   const [showSummary, setShowSummary] = useState(false)
+  const [showRejected, setShowRejected] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
 
   const abortRef = useRef<AbortController | null>(null)
@@ -357,8 +520,23 @@ export function CalibrationPanel({
   // ── Derived values ──────────────────────────────────────────────────────────
 
   const enrichedRefs = getEnrichedRefsFromCandidates(candidates)
-  const allRefs = [...enrichedRefs, ...userRefs]
-  const counts = countByType(allRefs)
+  const rawRefs = [...enrichedRefs, ...userRefs]
+
+  if (process.env.NODE_ENV === 'development') {
+    const ids = rawRefs.map(r => r.id)
+    const dupeIds = ids.filter((id, i) => ids.indexOf(id) !== i)
+    if (dupeIds.length > 0) {
+      console.warn(
+        '[CalibrationPanel] Duplicate ref ids before normalization:', dupeIds,
+        '| enrichedRefs ids:', enrichedRefs.map(r => r.id),
+        '| userRefs ids:', userRefs.map(r => r.id),
+      )
+    }
+  }
+
+  const allRefs = dedupeRefs(rawRefs)
+  const nonRejectedRefs = allRefs.filter(r => r.calibrationGroup !== 'rejected')
+  const counts = countByType(nonRejectedRefs)
   const minMet = isMinThresholdMet(allRefs)
   const idealMet = isIdealThresholdMet(allRefs)
 
@@ -369,7 +547,7 @@ export function CalibrationPanel({
 
   // Calibration readiness label (4/5 is usable partial, not a failure)
   function getReadinessLabel(): string {
-    if (allRefs.length === 0) return ''
+    if (nonRejectedRefs.length === 0) return ''
     if (idealMet) return 'Full calibration'
     if (minMet) return 'Usable partial calibration'
     return 'Below threshold'
@@ -384,13 +562,13 @@ export function CalibrationPanel({
       fetch('/api/calibration/discover', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, targetCompany, roleTitle, type: 'target', jdSummary }),
+        body: JSON.stringify({ sessionId, targetCompany, roleTitle, type: 'target', jdSummary, jdText }),
         signal
       }).then(r => r.json()),
       fetch('/api/calibration/discover', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, targetCompany, roleTitle, type: 'comparable', jdSummary }),
+        body: JSON.stringify({ sessionId, targetCompany, roleTitle, type: 'comparable', jdSummary, jdText }),
         signal
       }).then(r => r.json())
     ])
@@ -416,7 +594,7 @@ export function CalibrationPanel({
     // Persist immediately after discovery
     await saveCalibrationCandidates(merged)
     return fresh.filter(c => c.status === 'queued')
-  }, [sessionId, targetCompany, roleTitle, jdSummary])
+  }, [sessionId, targetCompany, roleTitle, jdSummary, jdText])
 
   const enrichOne = useCallback(async (candidate: CalibrationCandidate, signal: AbortSignal): Promise<void> => {
     const enrichingCandidate = { ...candidate, status: 'enriching' as CandidateStatus }
@@ -428,7 +606,7 @@ export function CalibrationPanel({
       const res = await fetch('/api/calibration/enrich', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate, targetCompany, roleTitle }),
+        body: JSON.stringify({ candidate, targetCompany, roleTitle, jdText }),
         signal
       })
       const data = await res.json()
@@ -443,7 +621,7 @@ export function CalibrationPanel({
 
     // Persist each enriched/failed candidate immediately
     await updateCalibrationCandidate(enriched)
-  }, [targetCompany, roleTitle])
+  }, [targetCompany, roleTitle, jdText])
 
   const runEnrichmentQueue = useCallback(async (queue: CalibrationCandidate[], signal: AbortSignal): Promise<void> => {
     setPipelineStatus('enriching')
@@ -520,7 +698,7 @@ export function CalibrationPanel({
       if (signal.aborted) return
 
       const enriched = getEnrichedRefsFromCandidates(candidatesRef.current)
-      const allForSynth = [...enriched, ...userRefs]
+      const allForSynth = [...enriched, ...userRefs].filter(r => r.calibrationGroup !== 'rejected')
       await runSynthesis(allForSynth, signal)
 
       if (!signal.aborted) setPipelineStatus('complete')
@@ -582,7 +760,7 @@ export function CalibrationPanel({
       targetReferenceCount: counts.target,
       comparableReferenceCount: counts.comparable,
       appliedCalibrationPatterns: summaryToApply.calibrationPatterns.slice(0, 8),
-      referencedCalibrationIds: allRefs.map(r => r.id),
+      referencedCalibrationIds: nonRejectedRefs.map(r => r.id),
       appliedAt: now,
       calibrationUpdatedAfterApply: false
     }
@@ -605,15 +783,74 @@ export function CalibrationPanel({
     await saveCalibrationCandidates(candidatesRef.current)
   }
 
+  function handleUpdateRef(updated: CalibrationReference) {
+    setUserRefs(prev => {
+      const idx = prev.findIndex(r => r.id === updated.id)
+      if (idx < 0) return prev
+      const next = [...prev]
+      next[idx] = updated
+      return next
+    })
+    syncCandidates(candidatesRef.current.map(c =>
+      c.enrichedRef?.id === updated.id ? { ...c, enrichedRef: updated } : c
+    ))
+  }
+
   function handleAddedUserRef(ref: CalibrationReference) {
     setUserRefs(prev => [...prev, ref])
     upsertCalibrationReference(ref).catch(() => {})
   }
 
+  async function handleReclassify(ref: CalibrationReference, manualContext: string) {
+    // Build a synthetic candidate that includes the manual context in its snippet
+    const syntheticCandidate: CalibrationCandidate = {
+      id: ref.id,
+      sessionId,
+      status: 'queued' as const,
+      candidateMatchType: ref.matchType,
+      title: ref.title,
+      company: ref.company,
+      sourceUrl: ref.sourceUrl,
+      discoverySnippet: manualContext
+        ? `${ref.snippetOrSummary}\n\n[User-pasted context]: ${manualContext}`
+        : ref.snippetOrSummary,
+      roughMatchReason: ref.matchReason,
+      initialConfidence: ref.confidence,
+      retryCount: 0,
+      discoveredAt: ref.collectedAt ?? new Date().toISOString(),
+    }
+
+    try {
+      const res = await fetch('/api/calibration/enrich', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate: syntheticCandidate, targetCompany, roleTitle, jdText })
+      })
+      const data = await res.json()
+      const enriched: CalibrationCandidate = data.candidate
+      if (enriched?.status === 'enriched' && enriched.enrichedRef) {
+        // Merge new classification fields onto the existing ref (keep manualContext already saved)
+        const reclassified: CalibrationReference = {
+          ...ref,
+          calibrationGroup: enriched.enrichedRef.calibrationGroup,
+          sourceDepth: enriched.enrichedRef.sourceDepth,
+          useFor: enriched.enrichedRef.useFor,
+          doNotUseFor: enriched.enrichedRef.doNotUseFor,
+          jdAlignmentElements: enriched.enrichedRef.jdAlignmentElements,
+          riskNote: enriched.enrichedRef.riskNote,
+          rejectedReason: enriched.enrichedRef.rejectedReason,
+        }
+        await upsertCalibrationReference(reclassified)
+        handleUpdateRef(reclassified)
+      }
+    } catch {
+      // Non-fatal — ref stays with previous classification
+    }
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
-  const targetRefs = allRefs.filter(r => r.matchType === 'target_company')
-  const comparableRefs = allRefs.filter(r => r.matchType !== 'target_company')
+  const rejectedRefs = allRefs.filter(r => r.calibrationGroup === 'rejected')
   const isApplied = appliedState !== undefined && !appliedState.calibrationUpdatedAfterApply
   const readinessLabel = getReadinessLabel()
 
@@ -634,12 +871,13 @@ export function CalibrationPanel({
         <div className="flex items-center gap-3 min-w-0 flex-wrap">
           <h2 className="text-sm font-semibold text-white shrink-0">Stage 3A — Calibration References</h2>
 
-          {allRefs.length > 0 && (
+          {nonRejectedRefs.length > 0 && (
             <span className="text-xs text-gray-400 shrink-0">
               {counts.target}/5 target · {counts.comparable}/5 comparable
+              {rejectedRefs.length > 0 && <span className="text-gray-600 ml-1">· {rejectedRefs.length} rejected</span>}
             </span>
           )}
-          {allRefs.length > 0 && readinessLabel && (
+          {nonRejectedRefs.length > 0 && readinessLabel && (
             <span className={`text-xs shrink-0 ${idealMet ? 'text-green-500' : minMet ? 'text-amber-400' : 'text-gray-500'}`}>
               {readinessLabel}
             </span>
@@ -713,27 +951,65 @@ export function CalibrationPanel({
             </p>
           )}
 
-          {/* Target company refs */}
-          {targetRefs.length > 0 && (
+          {/* Global calibration note */}
+          {nonRejectedRefs.length > 0 && (
+            <p className="text-xs text-gray-600 border border-gray-800 rounded px-3 py-2">
+              Calibration sources shape resume language and market framing only. They do not create candidate claims.
+            </p>
+          )}
+
+          {/* Primary refs */}
+          {allRefs.filter(r => r.calibrationGroup === 'primary').length > 0 && (
             <div className="space-y-2">
-              <p className="text-xs font-medium text-gray-400">
-                {targetCompany} — {targetRefs.length}/5
-                {targetRefs.length >= 3 && targetRefs.length < 5 && <span className="text-amber-500 ml-1">(usable)</span>}
-                {targetRefs.length >= 5 && <span className="text-green-500 ml-1">(complete)</span>}
-              </p>
-              {targetRefs.map(r => <RefCard key={r.id} ref={r} onRemove={() => handleRemoveRef(r.id)} />)}
+              <p className="text-xs font-medium text-green-700">Primary — full voice/framing use</p>
+              {allRefs.filter(r => r.calibrationGroup === 'primary').map(r => (
+                <RefCard key={r.id} ref={r} onRemove={() => handleRemoveRef(r.id)} onUpdate={handleUpdateRef} onReclassify={handleReclassify} />
+              ))}
             </div>
           )}
 
-          {/* Comparable refs */}
-          {comparableRefs.length > 0 && (
+          {/* Supporting refs */}
+          {allRefs.filter(r => r.calibrationGroup === 'supporting').length > 0 && (
             <div className="space-y-2">
-              <p className="text-xs font-medium text-gray-400">
-                Comparable / competitor — {comparableRefs.length}/5
-                {comparableRefs.length >= 3 && comparableRefs.length < 5 && <span className="text-amber-500 ml-1">(usable)</span>}
-                {comparableRefs.length >= 5 && <span className="text-green-500 ml-1">(complete)</span>}
-              </p>
-              {comparableRefs.map(r => <RefCard key={r.id} ref={r} onRemove={() => handleRemoveRef(r.id)} />)}
+              <p className="text-xs font-medium text-blue-600">Supporting — domain vocabulary only</p>
+              {allRefs.filter(r => r.calibrationGroup === 'supporting').map(r => (
+                <RefCard key={r.id} ref={r} onRemove={() => handleRemoveRef(r.id)} onUpdate={handleUpdateRef} onReclassify={handleReclassify} />
+              ))}
+            </div>
+          )}
+
+          {/* Context-only refs */}
+          {allRefs.filter(r => r.calibrationGroup === 'context_only').length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-amber-700">Context only — company/domain background</p>
+              {allRefs.filter(r => r.calibrationGroup === 'context_only').map(r => (
+                <RefCard key={r.id} ref={r} onRemove={() => handleRemoveRef(r.id)} onUpdate={handleUpdateRef} onReclassify={handleReclassify} />
+              ))}
+            </div>
+          )}
+
+          {/* Uncategorized refs (no calibrationGroup yet — mechanical enrichment default) */}
+          {allRefs.filter(r => !r.calibrationGroup).length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-gray-500">Pending classification</p>
+              {allRefs.filter(r => !r.calibrationGroup).map(r => (
+                <RefCard key={r.id} ref={r} onRemove={() => handleRemoveRef(r.id)} onUpdate={handleUpdateRef} onReclassify={handleReclassify} />
+              ))}
+            </div>
+          )}
+
+          {/* Rejected refs — collapsible */}
+          {rejectedRefs.length > 0 && (
+            <div className="space-y-2">
+              <button
+                onClick={() => setShowRejected(v => !v)}
+                className="text-xs text-gray-600 hover:text-gray-400"
+              >
+                {showRejected ? '▲' : '▼'} {rejectedRefs.length} rejected ref{rejectedRefs.length !== 1 ? 's' : ''} (excluded from apply)
+              </button>
+              {showRejected && rejectedRefs.map(r => (
+                <RefCard key={r.id} ref={r} onRemove={() => handleRemoveRef(r.id)} onUpdate={handleUpdateRef} onReclassify={handleReclassify} />
+              ))}
             </div>
           )}
 
@@ -766,7 +1042,7 @@ export function CalibrationPanel({
           )}
 
           {/* Threshold hint — below minimum */}
-          {!isRunning && !minMet && allRefs.length > 0 && (
+          {!isRunning && !minMet && nonRejectedRefs.length > 0 && (
             <p className="text-xs text-gray-500">
               {counts.target < 3 ? `${3 - counts.target} more target ref${3 - counts.target !== 1 ? 's' : ''} needed` : ''}
               {counts.target < 3 && counts.comparable < 3 ? ' or ' : ''}

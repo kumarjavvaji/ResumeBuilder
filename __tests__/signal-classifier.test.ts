@@ -56,7 +56,7 @@ describe('Signal classifier — classification boundary', () => {
       'For BA roles, prioritize requirements translation, UAT readiness, and stakeholder alignment over generic product ownership language.',
       'Do not convert DomainIQ company facts into candidate claims.',
       'When accepted bullets repeatedly use metrics, preserve metric-bearing bullets during compression before cutting unmeasured bullets.',
-      'For Kumar, Product Analyst and Product Owner experience should often be merged into a single analysis-to-delivery narrative for BA/APO roles.',
+      'For this candidate, Product Analyst and Product Owner experience should often be merged into a single analysis-to-delivery narrative for BA/APO roles.',
       'Unknown DOCX styles should be treated as parser warnings if extraction succeeds.',
       'Accepted BA bullets that combine workflow review, acceptance criteria, and production-risk reduction are strong for insurance/financial-services BA roles.',
     ]

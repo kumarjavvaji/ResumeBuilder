@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+﻿import { describe, expect, it } from 'vitest'
 import type { ArtifactSection, ResumeBullet, SectionType, UserProfile, WorkEntry } from '@/contracts'
 import {
   buildStage4RawResumeText,
@@ -74,9 +74,9 @@ function profile(overrides: Partial<UserProfile> = {}): UserProfile {
     linkedIn: '',
     summary: '',
     workHistory: [
-      work({ id: 'po-role', title: 'Product Owner', company: 'Paylocity', startDate: '2023', endDate: 'Present' }),
-      work({ id: 'ba-role', title: 'Product Analyst', company: 'Paylocity', startDate: '2020', endDate: '2023' }),
-      work({ id: 'qa-role', title: 'Lead QA Analyst', company: 'Paylocity', startDate: '2017', endDate: '2020' })
+      work({ id: 'po-role', title: 'Product Owner', company: 'SaaS Co', startDate: '2023', endDate: 'Present' }),
+      work({ id: 'ba-role', title: 'Product Analyst', company: 'SaaS Co', startDate: '2020', endDate: '2023' }),
+      work({ id: 'qa-role', title: 'Lead QA Analyst', company: 'SaaS Co', startDate: '2017', endDate: '2020' })
     ],
     education: [{ id: 'edu-1', institution: 'State University', degree: 'BS', field: 'Information Systems', graduationYear: '2016' }],
     skillGroups: [],
@@ -223,3 +223,4 @@ describe('Stage 4 raw resume text', () => {
     expect(regenerated.find(s => s.type === 'summary')?.status).toBe('accepted')
   })
 })
+

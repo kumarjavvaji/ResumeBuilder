@@ -50,7 +50,7 @@ const blueprint: ResumeGenerationContract = {
     education: { maxLines: 3 },
   },
   sessionDirection: {
-    representPOFrom2021: false,
+    representPrimaryPO: false,
     avoidFormalTitleHedging: true,
     targetPosture: 'Product analyst',
     roadmapBoundary: 'Execution and prioritization.',

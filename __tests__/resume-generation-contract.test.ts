@@ -1,12 +1,12 @@
-/**
+﻿/**
  * ResumeGenerationContract tests.
  *
- * A. Section balance — sectionPlan limits derived correctly
- * B. Banned phrases — present in bannedPhrases + preferredReplacements
- * C. Session direction — representPOFrom2021, azureDevOpsAllowed, salesforcePreferredPhrase
- * D. JD theme placement — requiredBulletThemes derived from JD; validateResumeAgainstContract reports missing
- * E. Refinement contract reuse — serializeContractForPrompt produces correct prompt block
- * F. Deterministic repairs — applyDeterministicRepairs removes banned content
+ * A. Section balance â€” sectionPlan limits derived correctly
+ * B. Banned phrases â€” present in bannedPhrases + preferredReplacements
+ * C. Session direction â€” representPrimaryPO, azureDevOpsAllowed, salesforcePreferredPhrase
+ * D. JD theme placement â€” requiredBulletThemes derived from JD; validateResumeAgainstContract reports missing
+ * E. Refinement contract reuse â€” serializeContractForPrompt produces correct prompt block
+ * F. Deterministic repairs â€” applyDeterministicRepairs removes banned content
  */
 
 import { describe, it, expect } from 'vitest'
@@ -21,7 +21,7 @@ import type { UserProfile, JDRequirementMap, WorkEntry, SkillGroup } from '../co
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
-// ─── Fixtures ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Fixtures â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function makeProfile(overrides: Partial<UserProfile> = {}): UserProfile {
   return {
@@ -35,7 +35,7 @@ function makeProfile(overrides: Partial<UserProfile> = {}): UserProfile {
     workHistory: [
       {
         id: 'w1',
-        company: 'Paylocity',
+        company: 'SaaS Co',
         title: 'Product Owner',
         startDate: 'Mar 2021',
         endDate: 'Oct 2024',
@@ -46,7 +46,7 @@ function makeProfile(overrides: Partial<UserProfile> = {}): UserProfile {
       } as WorkEntry,
       {
         id: 'w2',
-        company: 'Paylocity',
+        company: 'SaaS Co',
         title: 'Product Analyst',
         startDate: 'Nov 2018',
         endDate: 'Mar 2021',
@@ -57,7 +57,7 @@ function makeProfile(overrides: Partial<UserProfile> = {}): UserProfile {
       } as WorkEntry,
       {
         id: 'w3',
-        company: 'GAINSystems',
+        company: 'Prior Employer Corp',
         title: 'Lead Software Test Engineer',
         startDate: 'Jan 2014',
         endDate: 'Nov 2018',
@@ -110,14 +110,14 @@ function makeInput(overrides: Partial<ContractBuildInput> = {}): ContractBuildIn
     emphasisRecommendation: 'PO',
     roleTitle: 'Product Owner',
     overallRefinementPrompt:
-      'Treat March 2021–October 2024 as Product Owner experience. Do not hedge on the PO title.',
+      'Treat March 2021â€“October 2024 as Product Owner experience. Do not hedge on the PO title.',
     jdMap: makeJDMap(),
     profile: makeProfile(),
     ...overrides,
   }
 }
 
-// ─── A. Section balance ───────────────────────────────────────────────────────
+// â”€â”€â”€ A. Section balance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('A. Section balance', () => {
   it('A1: sectionPlan.summary.maxLines is 4 for PO role', () => {
@@ -174,7 +174,7 @@ Testing: Selenium, TestRail
 
 EXPERIENCE
 Product Owner
-Paylocity | Mar 2021 - Oct 2024
+SaaS Co | Mar 2021 - Oct 2024
 - bullet one
 - bullet two
 - bullet three
@@ -182,7 +182,7 @@ Paylocity | Mar 2021 - Oct 2024
 - bullet five
 
 Product Analyst
-Paylocity | Nov 2018 - Mar 2021
+SaaS Co | Nov 2018 - Mar 2021
 - bullet one
 - bullet two
 - bullet three
@@ -205,7 +205,7 @@ Product: Jira
 
 EXPERIENCE
 Product Owner
-Paylocity | Mar 2021 - Oct 2024
+SaaS Co | Mar 2021 - Oct 2024
 - bullet 1
 - bullet 2
 - bullet 3
@@ -215,7 +215,7 @@ Paylocity | Mar 2021 - Oct 2024
 - bullet 7
 
 Product Analyst
-Paylocity | Nov 2018 - Mar 2021
+SaaS Co | Nov 2018 - Mar 2021
 - bullet 1
 - bullet 2
 - bullet 3
@@ -231,7 +231,7 @@ BS | University`
     const c = buildResumeGenerationContract(makeInput())
     const text = `SUMMARY
 CSPO-certified Product Owner with 3.5 years leading backlog execution.
-Delivered release-ready scope at Paylocity across HR SaaS products.
+Delivered release-ready scope at SaaS Co across HR SaaS products.
 Brings QA-informed judgment on acceptance criteria and release readiness.
 
 SKILLS
@@ -243,7 +243,7 @@ Data: Excel
 
 EXPERIENCE
 Product Owner
-Paylocity | Mar 2021 - Oct 2024
+SaaS Co | Mar 2021 - Oct 2024
 - Executed leadership-sponsored roadmap for payroll module.
 - Refined 200+ user stories with acceptance criteria.
 - Coordinated UAT with QA team.
@@ -251,14 +251,14 @@ Paylocity | Mar 2021 - Oct 2024
 - Translated KPI feedback into prioritization decisions.
 
 Product Analyst
-Paylocity | Nov 2018 - Mar 2021
+SaaS Co | Nov 2018 - Mar 2021
 - Triaged business requirements for integration features.
 - Maintained UAT documentation and sprint demo notes.
 - Analyzed usage data to recommend product improvements.
 - Supported backlog refinement, sprint demos, and ceremony preparation.
 
 Lead Software Test Engineer
-GAINSystems | Jan 2014 - Nov 2018
+Prior Employer Corp | Jan 2014 - Nov 2018
 - Built regression test suites for ERP modules.
 - Reduced production defect rate by ~25%.
 - Validated release readiness for 3 major product versions.
@@ -274,7 +274,7 @@ Certified Scrum Product Owner (CSPO), Scrum Alliance, 2017`
   })
 })
 
-// ─── B. Banned phrases ───────────────────────────────────────────────────────
+// â”€â”€â”€ B. Banned phrases â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('B. Banned phrases', () => {
   it('B1: "Salesforce Segmentation" is always banned', () => {
@@ -311,21 +311,21 @@ describe('B. Banned phrases', () => {
     expect(c.bannedPhrases).not.toContain('Azure DevOps')
   })
 
-  it('B6: preferred replacement maps "Salesforce Segmentation" → salesforcePreferredPhrase', () => {
+  it('B6: preferred replacement maps "Salesforce Segmentation" â†’ salesforcePreferredPhrase', () => {
     const c = buildResumeGenerationContract(makeInput())
     expect(c.preferredReplacements['Salesforce Segmentation']).toBe('Salesforce Reporting')
   })
 
   it('B7: validator detects "formal PO tenure" as banned_phrase violation', () => {
     const c = buildResumeGenerationContract(makeInput())
-    const text = `SUMMARY\nWith formal PO tenure at Paylocity, I led delivery.\n\nSKILLS\nProduct: Jira\n\nEXPERIENCE\nProduct Owner\nPaylocity | Mar 2021 - Oct 2024\n- bullet one\n- bullet two\n- bullet three\n- bullet four\n- bullet five\n\nProduct Analyst\nPaylocity | Nov 2018 - Mar 2021\n- bullet one\n- bullet two\n- bullet three\n- bullet four\n\nEDUCATION\nBS Engineering`
+    const text = `SUMMARY\nWith formal PO tenure at SaaS Co, I led delivery.\n\nSKILLS\nProduct: Jira\n\nEXPERIENCE\nProduct Owner\nSaaS Co | Mar 2021 - Oct 2024\n- bullet one\n- bullet two\n- bullet three\n- bullet four\n- bullet five\n\nProduct Analyst\nSaaS Co | Nov 2018 - Mar 2021\n- bullet one\n- bullet two\n- bullet three\n- bullet four\n\nEDUCATION\nBS Engineering`
     const result = validateResumeAgainstContract(text, c)
     expect(result.violations.some(v => v.rule === 'banned_phrase' && v.detail.includes('formal PO tenure'))).toBe(true)
   })
 
   it('B8: validator detects "Azure DevOps" when not allowed', () => {
     const c = buildResumeGenerationContract(makeInput())
-    const text = `SUMMARY\nPositioning statement.\n\nSKILLS\nTools: Azure DevOps, Jira\n\nEXPERIENCE\nProduct Owner\nPaylocity | Mar 2021 - Oct 2024\n- bullet 1\n- bullet 2\n- bullet 3\n- bullet 4\n- bullet 5\n\nProduct Analyst\nPaylocity | Nov 2018 - Mar 2021\n- bullet 1\n- bullet 2\n- bullet 3\n- bullet 4\n\nEDUCATION\nBS Engineering`
+    const text = `SUMMARY\nPositioning statement.\n\nSKILLS\nTools: Azure DevOps, Jira\n\nEXPERIENCE\nProduct Owner\nSaaS Co | Mar 2021 - Oct 2024\n- bullet 1\n- bullet 2\n- bullet 3\n- bullet 4\n- bullet 5\n\nProduct Analyst\nSaaS Co | Nov 2018 - Mar 2021\n- bullet 1\n- bullet 2\n- bullet 3\n- bullet 4\n\nEDUCATION\nBS Engineering`
     const result = validateResumeAgainstContract(text, c)
     expect(
       result.violations.some(v => v.rule === 'banned_phrase' || v.rule === 'azure_devops_banned')
@@ -339,15 +339,15 @@ describe('B. Banned phrases', () => {
   })
 })
 
-// ─── C. Session direction ─────────────────────────────────────────────────────
+// â”€â”€â”€ C. Session direction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('C. Session direction', () => {
-  it('C1: representPOFrom2021 true when overallPrompt mentions 2021 + Product Owner', () => {
+  it('C1: representPrimaryPO true when profile contains a Product Owner role', () => {
     const c = buildResumeGenerationContract(makeInput())
-    expect(c.sessionDirection.representPOFrom2021).toBe(true)
+    expect(c.sessionDirection.representPrimaryPO).toBe(true)
   })
 
-  it('C2: representPOFrom2021 false when prompt has no 2021 signal and no PO work history in 2021', () => {
+  it('C2: representPrimaryPO false when profile has no PO work history', () => {
     const profile = makeProfile({
       workHistory: [
         {
@@ -366,18 +366,18 @@ describe('C. Session direction', () => {
     const c = buildResumeGenerationContract(
       makeInput({ overallRefinementPrompt: 'Focus on BA skills', profile, emphasisRecommendation: 'BA' })
     )
-    expect(c.sessionDirection.representPOFrom2021).toBe(false)
+    expect(c.sessionDirection.representPrimaryPO).toBe(false)
   })
 
-  it('C3: representPOFrom2021 true when work history contains PO role starting 2021', () => {
+  it('C3: representPrimaryPO true when work history contains a Product Owner role', () => {
     const c = buildResumeGenerationContract(
       makeInput({ overallRefinementPrompt: 'Highlight analytical skills only' })
     )
-    // Profile has PO role with startDate 'Mar 2021'
-    expect(c.sessionDirection.representPOFrom2021).toBe(true)
+    // Profile has a Product Owner work entry
+    expect(c.sessionDirection.representPrimaryPO).toBe(true)
   })
 
-  it('C4: avoidFormalTitleHedging is true when representPOFrom2021 is true', () => {
+  it('C4: avoidFormalTitleHedging is true when profile has primary PO role', () => {
     const c = buildResumeGenerationContract(makeInput())
     expect(c.sessionDirection.avoidFormalTitleHedging).toBe(true)
   })
@@ -420,23 +420,13 @@ describe('C. Session direction', () => {
     expect(c.evidenceRouting['CSPO']).toContain('education')
   })
 
-  it('C12: GAINSystems allowed in summary when JD has supply chain context', () => {
-    const jdMap = makeJDMap({
-      required: [
-        { text: 'Supply chain domain experience preferred', category: 'domain', userCoverageStatus: 'partial' },
-      ],
-    })
-    const c = buildResumeGenerationContract(makeInput({ jdMap }))
-    expect(c.evidenceRouting['GAINSystems']).toContain('summary')
-  })
-
-  it('C13: GAINSystems excluded (empty routing) for standard product roles', () => {
+  it('C12: roadmap ownership routed to experience-po', () => {
     const c = buildResumeGenerationContract(makeInput())
-    expect(c.evidenceRouting['GAINSystems']).toEqual([])
+    expect(c.evidenceRouting['roadmap ownership']).toContain('experience-po')
   })
 })
 
-// ─── D. JD theme placement ────────────────────────────────────────────────────
+// â”€â”€â”€ D. JD theme placement â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('D. JD theme placement', () => {
   it('D1: UAT JD requirement produces "UAT / QA collaboration" theme', () => {
@@ -478,7 +468,7 @@ Product: Jira
 
 EXPERIENCE
 Product Owner
-Paylocity | Mar 2021 - Oct 2024
+SaaS Co | Mar 2021 - Oct 2024
 - Executed roadmap for payroll module.
 - Refined user stories with acceptance criteria.
 - Coordinated UAT with QA.
@@ -486,7 +476,7 @@ Paylocity | Mar 2021 - Oct 2024
 - Translated stakeholder feedback.
 
 Product Analyst
-Paylocity | Nov 2018 - Mar 2021
+SaaS Co | Nov 2018 - Mar 2021
 - Triaged requirements.
 - Maintained documentation.
 - Supported sprint demos.
@@ -505,22 +495,22 @@ BS Engineering`
       ],
     })
     const c = buildResumeGenerationContract(makeInput({ jdMap }))
-    const text = `SUMMARY\nPositioning statement.\n\nSKILLS\nProduct: Jira\n\nEXPERIENCE\nProduct Owner\nPaylocity | Mar 2021 - Oct 2024\n- Tracked product KPI and reported performance via Pendo dashboards.\n- Refined user stories with acceptance criteria.\n- Coordinated UAT.\n- Reduced sprint carry-over.\n- Translated stakeholder feedback.\n\nProduct Analyst\nPaylocity | Nov 2018 - Mar 2021\n- Triaged requirements.\n- Maintained documentation.\n- Supported sprint demos.\n- Analyzed usage data.\n\nEDUCATION\nBS Engineering`
+    const text = `SUMMARY\nPositioning statement.\n\nSKILLS\nProduct: Jira\n\nEXPERIENCE\nProduct Owner\nSaaS Co | Mar 2021 - Oct 2024\n- Tracked product KPI and reported performance via Pendo dashboards.\n- Refined user stories with acceptance criteria.\n- Coordinated UAT.\n- Reduced sprint carry-over.\n- Translated stakeholder feedback.\n\nProduct Analyst\nSaaS Co | Nov 2018 - Mar 2021\n- Triaged requirements.\n- Maintained documentation.\n- Supported sprint demos.\n- Analyzed usage data.\n\nEDUCATION\nBS Engineering`
     const result = validateResumeAgainstContract(text, c)
     expect(result.violations.some(v => v.rule === 'missing_jd_theme')).toBe(false)
   })
 
   it('D6: validator flags QA exceeding PA bullet count for product roles', () => {
     const c = buildResumeGenerationContract(makeInput())
-    const text = `SUMMARY\nPositioning statement.\n\nSKILLS\nProduct: Jira\n\nEXPERIENCE\nProduct Owner\nPaylocity | Mar 2021 - Oct 2024\n- bullet 1\n- bullet 2\n- bullet 3\n- bullet 4\n- bullet 5\n\nProduct Analyst\nPaylocity | Nov 2018 - Mar 2021\n- bullet 1\n- bullet 2\n\nLead Software Test Engineer\nGAINSystems | Jan 2014 - Nov 2018\n- bullet 1\n- bullet 2\n- bullet 3\n- bullet 4\n\nEDUCATION\nBS Engineering`
+    const text = `SUMMARY\nPositioning statement.\n\nSKILLS\nProduct: Jira\n\nEXPERIENCE\nProduct Owner\nSaaS Co | Mar 2021 - Oct 2024\n- bullet 1\n- bullet 2\n- bullet 3\n- bullet 4\n- bullet 5\n\nProduct Analyst\nSaaS Co | Nov 2018 - Mar 2021\n- bullet 1\n- bullet 2\n\nLead Software Test Engineer\nPrior Employer Corp | Jan 2014 - Nov 2018\n- bullet 1\n- bullet 2\n- bullet 3\n- bullet 4\n\nEDUCATION\nBS Engineering`
     const result = validateResumeAgainstContract(text, c)
     expect(result.violations.some(v => v.rule === 'qa_exceeds_pa')).toBe(true)
   })
 })
 
-// ─── E. Refinement contract reuse (serialization) ────────────────────────────
+// â”€â”€â”€ E. Refinement contract reuse (serialization) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-describe('E. Refinement contract reuse — serializeContractForPrompt', () => {
+describe('E. Refinement contract reuse â€” serializeContractForPrompt', () => {
   it('E1: serialized block contains role family', () => {
     const c = buildResumeGenerationContract(makeInput())
     const prompt = serializeContractForPrompt(c)
@@ -532,7 +522,7 @@ describe('E. Refinement contract reuse — serializeContractForPrompt', () => {
     const prompt = serializeContractForPrompt(c)
     expect(prompt).toContain('max 4 lines')
     expect(prompt).toContain('max 5 rows')
-    expect(prompt).toContain('5–6 bullets')
+    expect(prompt).toContain('5â€“6 bullets')
   })
 
   it('E3: serialized block contains PO 2021 session direction when set', () => {
@@ -584,9 +574,9 @@ describe('E. Refinement contract reuse — serializeContractForPrompt', () => {
   })
 })
 
-// ─── F. Deterministic repairs ────────────────────────────────────────────────
+// â”€â”€â”€ F. Deterministic repairs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-describe('F. Deterministic repairs — applyDeterministicRepairs', () => {
+describe('F. Deterministic repairs â€” applyDeterministicRepairs', () => {
   it('F1: replaces "Salesforce Segmentation" with salesforcePreferredPhrase', () => {
     const c = buildResumeGenerationContract(makeInput())
     const text = 'Skills: Salesforce Segmentation, Jira, Confluence'
@@ -598,7 +588,7 @@ describe('F. Deterministic repairs — applyDeterministicRepairs', () => {
 
   it('F2: replaces "formal PO tenure" when avoidFormalTitleHedging is true', () => {
     const c = buildResumeGenerationContract(makeInput())
-    const text = 'My formal PO tenure at Paylocity spans 3.5 years.'
+    const text = 'My formal PO tenure at SaaS Co spans 3.5 years.'
     const { repairedText } = applyDeterministicRepairs(text, c)
     expect(repairedText).not.toContain('formal PO tenure')
     expect(repairedText).toContain('3.5 years leading backlog execution')
@@ -606,7 +596,7 @@ describe('F. Deterministic repairs — applyDeterministicRepairs', () => {
 
   it('F3: replaces "PO-adjacent" with "Product Owner"', () => {
     const c = buildResumeGenerationContract(makeInput())
-    const text = 'Functioned in a PO-adjacent role at Paylocity.'
+    const text = 'Functioned in a PO-adjacent role at SaaS Co.'
     const { repairedText } = applyDeterministicRepairs(text, c)
     expect(repairedText).not.toContain('PO-adjacent')
     expect(repairedText).toContain('Product Owner')
@@ -638,7 +628,7 @@ describe('F. Deterministic repairs — applyDeterministicRepairs', () => {
 
   it('F7: no repair applied when text is already clean', () => {
     const c = buildResumeGenerationContract(makeInput())
-    const text = 'Product Owner at Paylocity with Jira, Confluence, Pendo.'
+    const text = 'Product Owner at SaaS Co with Jira, Confluence, Pendo.'
     const { repairsApplied } = applyDeterministicRepairs(text, c)
     expect(repairsApplied).toHaveLength(0)
   })
@@ -652,8 +642,9 @@ describe('F. Deterministic repairs — applyDeterministicRepairs', () => {
 
   it('F9: repair result repairsApplied lists each repair performed', () => {
     const c = buildResumeGenerationContract(makeInput())
-    const text = 'Salesforce Segmentation users. Formal PO tenure at Paylocity.'
+    const text = 'Salesforce Segmentation users. Formal PO tenure at SaaS Co.'
     const { repairsApplied } = applyDeterministicRepairs(text, c)
     expect(repairsApplied.length).toBeGreaterThanOrEqual(2)
   })
 })
+

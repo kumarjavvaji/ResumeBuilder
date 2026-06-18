@@ -10,6 +10,21 @@
 
 import type { SectionType } from '@/contracts'
 
+/**
+ * Runtime context derived from the active user profile and JD.
+ * Replaces personal literals that were previously hardcoded in gate text —
+ * PO dates, verified metrics, and unrelated employer names are now read from
+ * the active profile at generation time.
+ */
+export interface QualityGateContext {
+  /** PO date range from work history, e.g. "March 2021 – October 2024". */
+  poDateRange?: string
+  /** Up to 3 verified metrics from the primary PO role's approvedMetrics. */
+  verifiedMetrics?: string[]
+  /** Employer names to explicitly exclude from summary (older + JD-irrelevant). */
+  olderEmployersToExclude?: string[]
+}
+
 // ─── Testable constants ───────────────────────────────────────────────────────
 
 /** Phrases that must never appear in a generated Summary. */
@@ -19,7 +34,6 @@ export const SUMMARY_PROHIBITIONS = [
   'grounding operational',
   'grounding data pipeline',
   'grounding supply chain',
-  'GAINSystems',
 ] as const
 
 /** Bullet quality rules enforced for all experience sections. */
@@ -42,7 +56,7 @@ export const PA_OVERCLAIM_PROHIBITIONS = [
  * Returns quality gate instructions for the given section type.
  * Injected at the end of the system prompt — after all other instructions.
  */
-export function buildSectionQualityGate(sectionType: SectionType): string {
+export function buildSectionQualityGate(sectionType: SectionType, ctx?: QualityGateContext): string {
   const lines: string[] = ['', '═══ QUALITY GATE — ENFORCE BEFORE RETURNING ═══']
 
   switch (sectionType) {
@@ -52,10 +66,12 @@ export function buildSectionQualityGate(sectionType: SectionType): string {
         'SUMMARY RULES (strictly enforced):',
         '- 3–4 lines maximum. This is a positioning statement, NOT a career history dump.',
         '- Lead with the target operating identity.',
-        '  Good: "CSPO-certified Product Owner with 3.5 years leading backlog execution, sprint delivery, user story refinement, UAT readiness, and business-to-IT translation for enterprise SaaS products."',
+        '  Good: "CSPO-certified Product Owner with [N] years leading backlog execution, sprint delivery, user story refinement, UAT readiness, and business-to-IT translation for enterprise SaaS products."',
         '- Mention CSPO only if it strengthens the JD match.',
         '- Mention QA background only as a single supporting phrase ("Brings QA-informed judgment on...") — do NOT narrate QA career history.',
-        '- DO NOT mention GAINSystems or other older employers unless the JD explicitly requires that domain.',
+        ctx?.olderEmployersToExclude?.length
+          ? `- DO NOT mention ${ctx.olderEmployersToExclude.map(e => `"${e}"`).join(', ')} or other older employers unless the JD explicitly requires that domain.`
+          : '- DO NOT mention older employers not required by this JD.',
         '- DO NOT use "formal PO tenure" — sounds defensive and title-anxious.',
         '- DO NOT use "early career includes..." — turns the summary into a compressed resume.',
         '- DO NOT use "grounding X context" phrasing — vague filler.',
@@ -70,7 +86,9 @@ export function buildSectionQualityGate(sectionType: SectionType): string {
         'FINAL CHECK before returning summary:',
         '  □ Under 4 lines?',
         '  □ Reads as positioning, not career history?',
-        '  □ No GAINSystems, no "formal PO tenure", no "early career includes"?',
+        ctx?.olderEmployersToExclude?.length
+          ? `  □ No ${ctx.olderEmployersToExclude.map(e => `"${e}"`).join(', ')}, no "formal PO tenure", no "early career includes"?`
+          : '  □ No older employers not required by this JD, no "formal PO tenure", no "early career includes"?',
         '  □ No sentence starts with "Early career...", "Background includes...", "With a decade of..."?',
       )
       break
@@ -96,10 +114,14 @@ export function buildSectionQualityGate(sectionType: SectionType): string {
         '- 1–2 lines per bullet maximum — no paragraph-length bullets.',
         '- One primary claim per bullet — do not chain 4–5 concepts with commas and dashes.',
         '- Use "~" for all approximations — never "approximately".',
-        '- Date range: March 2021–October 2024. Do not hedge as "PO-adjacent" or "acting PO".',
+        ctx?.poDateRange
+          ? `- Date range: ${ctx.poDateRange}. Do not hedge as "PO-adjacent" or "acting PO".`
+          : '- Use the exact date range from the candidate profile for the PO role. Do not hedge as "PO-adjacent" or "acting PO" if the profile treats this as the primary PO role.',
         '- Roadmap framing: use "executed leadership-sponsored roadmap" or "translated roadmap priorities into release-ready scope."',
         '  Do NOT use executive-strategy language that implies independent product vision ownership.',
-        '- Preserve verified metrics (~$63M retention, ~3% utilization growth) but compress surrounding wording.',
+        ctx?.verifiedMetrics?.length
+          ? `- Preserve verified metrics (${ctx.verifiedMetrics.map(m => `~${m}`).join(', ')}) but compress surrounding wording.`
+          : '- Preserve verified metrics from the candidate profile exactly as stated, but compress surrounding wording to stay within bullet length.',
         '',
         'FINAL CHECK:',
         '  □ Each bullet is 1–2 lines?',
@@ -163,13 +185,17 @@ export function buildSectionQualityGate(sectionType: SectionType): string {
  * Full-resume quality gate for Stage 4 full-resume refinement calls.
  * Checks the entire resume output before returning.
  */
-export function buildFullResumeQualityGate(): string {
+export function buildFullResumeQualityGate(ctx?: Pick<QualityGateContext, 'olderEmployersToExclude'>): string {
+  const employerCheck = ctx?.olderEmployersToExclude?.length
+    ? `  □ No "formal PO tenure", "early career includes", ${ctx.olderEmployersToExclude.map(e => `"${e}"`).join(', ')}, or defensive phrasing`
+    : '  □ No "formal PO tenure", "early career includes", older employers not required by this JD, or defensive phrasing'
+
   return `
 ═══ FULL-RESUME QUALITY GATE — VERIFY BEFORE RETURNING ═══
 
 SUMMARY CHECK:
   □ Summary is 3–4 lines and reads as a positioning statement, NOT a career history dump
-  □ No "formal PO tenure", "early career includes", GAINSystems, or defensive phrasing
+${employerCheck}
   □ No sentence starting with "Background includes...", "With a decade of...", "Early career..."
 
 SKILLS CHECK:

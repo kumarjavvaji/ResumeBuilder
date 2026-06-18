@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+﻿import { describe, expect, it } from 'vitest'
 import {
   formatCalibrationInfluenceLine,
   normalizeCalibrationInfluence,
@@ -89,13 +89,13 @@ describe('calibration influence audit', () => {
 
   it('source mappings remove calibration references while preserving evidence mappings', () => {
     const mappings = sanitizeSourceMappings([
-      'Gap analysis claim -> Product Analyst at Paylocity',
+      'Gap analysis claim -> Product Analyst at SaaS Co',
       'Requirements claim -> Calibration reference: CoverGo BA profile',
       'SQL usage analysis -> Bridge evidence'
     ])
 
     expect(mappings).toEqual([
-      'Gap analysis claim -> Product Analyst at Paylocity',
+      'Gap analysis claim -> Product Analyst at SaaS Co',
       'SQL usage analysis -> Bridge evidence'
     ])
   })
@@ -107,7 +107,7 @@ describe('calibration influence audit', () => {
         text: 'Mapped requirements.',
         claimStatus: 'supported',
         sourceSignal: 'user-history',
-        evidenceRef: 'Product Analyst at Paylocity',
+        evidenceRef: 'Product Analyst at SaaS Co',
         approved: null
       },
       {
@@ -121,7 +121,7 @@ describe('calibration influence audit', () => {
     ]
 
     const sanitized = sanitizeCalibrationEvidenceRefs(bullets)
-    expect(sanitized[0].evidenceRef).toBe('Product Analyst at Paylocity')
+    expect(sanitized[0].evidenceRef).toBe('Product Analyst at SaaS Co')
     expect(sanitized[1].evidenceRef).toBeUndefined()
   })
 
@@ -209,3 +209,4 @@ describe('calibration influence audit', () => {
     expect(line).not.toContain('Why this was written')
   })
 })
+
