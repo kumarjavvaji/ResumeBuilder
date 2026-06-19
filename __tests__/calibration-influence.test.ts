@@ -11,7 +11,7 @@ describe('calibration influence audit', () => {
   it('applied calibration with no concrete decisions records availability but no use', () => {
     const influence = normalizeCalibrationInfluence(undefined, {
       calibrationAvailable: true,
-      sectionType: 'experience-ba'
+      sectionType: 'experience-secondary'
     })
 
     expect(influence.calibrationAvailable).toBe(true)
@@ -31,11 +31,11 @@ describe('calibration influence audit', () => {
         pattern: 'SI BA evidence ordering',
         decisionType: 'ordering',
         decision: 'Ordered Business Analyst bullets before cross-role context because SI BA calibration patterns favored BA-specific evidence.',
-        affectedSection: 'experience-ba'
+        affectedSection: 'experience-secondary'
       }]
     }, {
       calibrationAvailable: true,
-      sectionType: 'experience-ba'
+      sectionType: 'experience-secondary'
     })
 
     expect(influence.calibrationUsed).toBe(true)
@@ -80,7 +80,7 @@ describe('calibration influence audit', () => {
       }]
     }, {
       calibrationAvailable: true,
-      sectionType: 'experience-ba'
+      sectionType: 'experience-secondary'
     })
 
     expect(influence.calibrationUsed).toBe(true)
@@ -129,7 +129,7 @@ describe('calibration influence audit', () => {
     const section = {
       id: 'sec-1',
       sessionId: 'sess-1',
-      type: 'experience-ba',
+      type: 'experience-secondary',
       content: 'content',
       bullets: [],
       status: 'accepted',
@@ -148,7 +148,7 @@ describe('calibration influence audit', () => {
           decisionType: 'ordering',
           decision: 'Ordered Business Analyst bullets before cross-role context because SI BA calibration patterns favored BA-specific evidence.'
         }]
-      }, { calibrationAvailable: true, sectionType: 'experience-ba' }),
+      }, { calibrationAvailable: true, sectionType: 'experience-secondary' }),
       version: 1,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -163,7 +163,7 @@ describe('calibration influence audit', () => {
   it('regenerating after reapplying calibration records a new influence state', () => {
     const previous = normalizeCalibrationInfluence(undefined, {
       calibrationAvailable: true,
-      sectionType: 'experience-ba'
+      sectionType: 'experience-secondary'
     })
     const regenerated = normalizeCalibrationInfluence({
       calibrationAvailable: true,
@@ -178,7 +178,7 @@ describe('calibration influence audit', () => {
       }]
     }, {
       calibrationAvailable: true,
-      sectionType: 'experience-ba'
+      sectionType: 'experience-secondary'
     })
 
     expect(previous.calibrationUsed).toBe(false)
@@ -200,7 +200,7 @@ describe('calibration influence audit', () => {
       }]
     }, {
       calibrationAvailable: true,
-      sectionType: 'experience-ba'
+      sectionType: 'experience-secondary'
     })
 
     const line = formatCalibrationInfluenceLine(influence)

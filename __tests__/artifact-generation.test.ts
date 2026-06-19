@@ -431,7 +431,7 @@ const QA_ENTRY = makeWorkEntry({ title: 'Lead QA Analyst', company: 'SaaS Co', d
 describe('PO section evidence scoping', () => {
   it('PO scope puts PA entry in supportingWorkEntries, not primaryWorkEntries', () => {
     const profile = makeProfile([PO_ENTRY, BA_ENTRY, QA_ENTRY])
-    const bundle = buildScopedEvidenceBundle(profile, [], 'experience-po')
+    const bundle = buildScopedEvidenceBundle(profile, [], 'experience-primary')
     const primaryTitles = bundle.primaryWorkEntries.map(e => e.title)
     const supportingTitles = bundle.supportingWorkEntries.map(e => e.title)
     expect(primaryTitles).toContain('Product Owner')
@@ -440,13 +440,13 @@ describe('PO section evidence scoping', () => {
   })
 
   it('PO section: Salesforce client request triage is a disallowed claim pattern', () => {
-    const bundle = buildScopedEvidenceBundle(makeProfile([PO_ENTRY, BA_ENTRY]), [], 'experience-po')
+    const bundle = buildScopedEvidenceBundle(makeProfile([PO_ENTRY, BA_ENTRY]), [], 'experience-primary')
     const bullet = 'Triaged 3,000+ Salesforce client requests across enterprise HR platform'
     expect(findDisallowedClaimPattern(bullet, bundle.scope.disallowedClaimPatterns)).not.toBeNull()
   })
 
   it('PO section has a framing note requiring prior-background citation', () => {
-    const bundle = buildScopedEvidenceBundle(makeProfile([PO_ENTRY, BA_ENTRY]), [], 'experience-po')
+    const bundle = buildScopedEvidenceBundle(makeProfile([PO_ENTRY, BA_ENTRY]), [], 'experience-primary')
     expect(bundle.scope.framingNote).toBeTruthy()
     expect(bundle.scope.framingNote).toContain('Prior background')
   })
@@ -457,7 +457,7 @@ describe('PO section evidence scoping', () => {
 describe('BA section evidence scoping', () => {
   it('BA scope puts PO entry in supportingWorkEntries, not primaryWorkEntries', () => {
     const profile = makeProfile([PO_ENTRY, BA_ENTRY, QA_ENTRY])
-    const bundle = buildScopedEvidenceBundle(profile, [], 'experience-ba')
+    const bundle = buildScopedEvidenceBundle(profile, [], 'experience-secondary')
     const primaryTitles = bundle.primaryWorkEntries.map(e => e.title)
     const supportingTitles = bundle.supportingWorkEntries.map(e => e.title)
     expect(primaryTitles).toContain('Product Analyst')
@@ -466,7 +466,7 @@ describe('BA section evidence scoping', () => {
   })
 
   it('BA section: Calendar Platform roadmap ownership is a disallowed claim pattern', () => {
-    const bundle = buildScopedEvidenceBundle(makeProfile([PO_ENTRY, BA_ENTRY]), [], 'experience-ba')
+    const bundle = buildScopedEvidenceBundle(makeProfile([PO_ENTRY, BA_ENTRY]), [], 'experience-secondary')
     const bullet = 'Drove Calendar Platform roadmap ownership and end-to-end delivery'
     expect(findDisallowedClaimPattern(bullet, bundle.scope.disallowedClaimPatterns)).not.toBeNull()
   })
@@ -477,7 +477,7 @@ describe('BA section evidence scoping', () => {
 describe('QA section evidence scoping', () => {
   it('QA scope puts PO and PA entries in supportingWorkEntries', () => {
     const profile = makeProfile([PO_ENTRY, BA_ENTRY, QA_ENTRY])
-    const bundle = buildScopedEvidenceBundle(profile, [], 'experience-qa')
+    const bundle = buildScopedEvidenceBundle(profile, [], 'experience-supporting')
     const primaryTitles = bundle.primaryWorkEntries.map(e => e.title)
     expect(primaryTitles).toContain('Lead QA Analyst')
     expect(primaryTitles).not.toContain('Product Owner')
@@ -485,13 +485,13 @@ describe('QA section evidence scoping', () => {
   })
 
   it('QA section: product roadmap ownership is a disallowed claim pattern', () => {
-    const bundle = buildScopedEvidenceBundle(makeProfile([PO_ENTRY, QA_ENTRY]), [], 'experience-qa')
+    const bundle = buildScopedEvidenceBundle(makeProfile([PO_ENTRY, QA_ENTRY]), [], 'experience-supporting')
     const bullet = 'Led product roadmap ownership and calendar platform delivery'
     expect(findDisallowedClaimPattern(bullet, bundle.scope.disallowedClaimPatterns)).not.toBeNull()
   })
 
   it('QA section: legitimate QA bullet is not blocked', () => {
-    const bundle = buildScopedEvidenceBundle(makeProfile([PO_ENTRY, QA_ENTRY]), [], 'experience-qa')
+    const bundle = buildScopedEvidenceBundle(makeProfile([PO_ENTRY, QA_ENTRY]), [], 'experience-supporting')
     const bullet = 'Authored SpecFlow acceptance tests reducing regression defect rate by 40%'
     expect(findDisallowedClaimPattern(bullet, bundle.scope.disallowedClaimPatterns)).toBeNull()
   })
@@ -523,8 +523,8 @@ describe('Skills section evidence scope', () => {
   it('skills scope includes all answered bridge questions (crossRolePolicy=full)', () => {
     const profile = makeProfile([PO_ENTRY])
     const qs = [
-      makeBridgeQuestion({ affectedArtifactSection: 'experience-po', type: 'evidence', status: 'answered' }),
-      makeBridgeQuestion({ affectedArtifactSection: 'experience-qa', type: 'evidence', status: 'answered' }),
+      makeBridgeQuestion({ affectedArtifactSection: 'experience-primary', type: 'evidence', status: 'answered' }),
+      makeBridgeQuestion({ affectedArtifactSection: 'experience-supporting', type: 'evidence', status: 'answered' }),
     ]
     const bundle = buildScopedEvidenceBundle(profile, qs, 'skills')
     const total = bundle.normalizedBridgeEvidence.length + bundle.uncertainBridgeEvidence.length
@@ -570,19 +570,19 @@ describe('uncertainty detection in bridge answers', () => {
     const profile = makeProfile([QA_ENTRY])
     const qs = [
       makeBridgeQuestion({
-        affectedArtifactSection: 'experience-qa',
+        affectedArtifactSection: 'experience-supporting',
         type: 'evidence',
         status: 'answered',
         userAnswer: "I'm not sure I worked on that specifically",
       }),
       makeBridgeQuestion({
-        affectedArtifactSection: 'experience-qa',
+        affectedArtifactSection: 'experience-supporting',
         type: 'evidence',
         status: 'answered',
         userAnswer: 'Yes, I wrote SpecFlow tests and automated regression suites.',
       }),
     ]
-    const bundle = buildScopedEvidenceBundle(profile, qs, 'experience-qa')
+    const bundle = buildScopedEvidenceBundle(profile, qs, 'experience-supporting')
     // In new architecture, the bundle separates confident from uncertain up front
     expect(bundle.uncertainBridgeEvidence).toHaveLength(1)
     expect(bundle.normalizedBridgeEvidence).toHaveLength(1)
@@ -619,7 +619,7 @@ describe('section-specific warning classification', () => {
   })
 
   it('downgraded bullet warning is not a global warning', () => {
-    expect(isGlobalEvidenceWarning('Bullet downgraded â€” contains out-of-scope claim pattern for experience-po: "3,000+ salesforce"')).toBe(false)
+    expect(isGlobalEvidenceWarning('Bullet downgraded â€” contains out-of-scope claim pattern for experience-primary: "3,000+ salesforce"')).toBe(false)
   })
 })
 
@@ -629,19 +629,19 @@ describe('work history source role separation', () => {
   it('each experience section correctly identifies its primary vs supporting entries', () => {
     const profile = makeProfile([PO_ENTRY, BA_ENTRY, QA_ENTRY])
 
-    const poBundle = buildScopedEvidenceBundle(profile, [], 'experience-po')
+    const poBundle = buildScopedEvidenceBundle(profile, [], 'experience-primary')
     expect(poBundle.primaryWorkEntries.map(e => e.title)).toEqual(['Product Owner'])
     expect(poBundle.supportingWorkEntries.map(e => e.title)).toEqual(
       expect.arrayContaining(['Product Analyst', 'Lead QA Analyst'])
     )
 
-    const baBundle = buildScopedEvidenceBundle(profile, [], 'experience-ba')
+    const baBundle = buildScopedEvidenceBundle(profile, [], 'experience-secondary')
     expect(baBundle.primaryWorkEntries.map(e => e.title)).toEqual(['Product Analyst'])
     expect(baBundle.supportingWorkEntries.map(e => e.title)).toEqual(
       expect.arrayContaining(['Product Owner', 'Lead QA Analyst'])
     )
 
-    const qaBundle = buildScopedEvidenceBundle(profile, [], 'experience-qa')
+    const qaBundle = buildScopedEvidenceBundle(profile, [], 'experience-supporting')
     expect(qaBundle.primaryWorkEntries.map(e => e.title)).toEqual(['Lead QA Analyst'])
     expect(qaBundle.supportingWorkEntries.map(e => e.title)).toEqual(
       expect.arrayContaining(['Product Owner', 'Product Analyst'])
@@ -650,17 +650,17 @@ describe('work history source role separation', () => {
 
   it('accepted section content is not affected by generating a different section', () => {
     const sections = new Map<SectionType, ArtifactSection>([
-      ['experience-po', makeSection({ type: 'experience-po', status: 'accepted', content: 'PO bullets accepted' })],
-      ['experience-ba', makeSection({ type: 'experience-ba', status: 'generated', content: 'BA bullets draft' })],
+      ['experience-primary', makeSection({ type: 'experience-primary', status: 'accepted', content: 'PO bullets accepted' })],
+      ['experience-secondary', makeSection({ type: 'experience-secondary', status: 'generated', content: 'BA bullets draft' })],
     ])
 
-    // Simulate generating experience-ba â€” only that key changes
-    const newBA = makeSection({ type: 'experience-ba', content: 'BA bullets regenerated', version: 2 })
-    const after = new Map(sections).set('experience-ba', newBA)
+    // Simulate generating experience-secondary â€” only that key changes
+    const newBA = makeSection({ type: 'experience-secondary', content: 'BA bullets regenerated', version: 2 })
+    const after = new Map(sections).set('experience-secondary', newBA)
 
-    expect(after.get('experience-po')!.status).toBe('accepted')
-    expect(after.get('experience-po')!.content).toBe('PO bullets accepted')
-    expect(after.get('experience-ba')!.content).toBe('BA bullets regenerated')
+    expect(after.get('experience-primary')!.status).toBe('accepted')
+    expect(after.get('experience-primary')!.content).toBe('PO bullets accepted')
+    expect(after.get('experience-secondary')!.content).toBe('BA bullets regenerated')
   })
 })
 
@@ -682,7 +682,7 @@ function makeRawBullet(
 
 describe('claim validator: disallowed role source', () => {
   it('a bullet whose evidenceRef resolves to a supporting (non-primary) entry is downgraded', () => {
-    const bundle = makeBundleFor('experience-po', [PO_ENTRY, BA_ENTRY])
+    const bundle = makeBundleFor('experience-primary', [PO_ENTRY, BA_ENTRY])
     const bullet = makeRawBullet(
       'Triaged 3,000+ Salesforce client requests.',
       'supported',
@@ -696,7 +696,7 @@ describe('claim validator: disallowed role source', () => {
   })
 
   it('downgraded claim has a diagnostic with a suggested section', () => {
-    const bundle = makeBundleFor('experience-po', [PO_ENTRY, BA_ENTRY])
+    const bundle = makeBundleFor('experience-primary', [PO_ENTRY, BA_ENTRY])
     const bullet = makeRawBullet(
       'Managed requirements and acceptance criteria for Salesforce integration.',
       'supported',
@@ -705,7 +705,7 @@ describe('claim validator: disallowed role source', () => {
     const results = validateSectionClaims([bullet], bundle)
     expect(results[0].diagnostic).not.toBeNull()
     expect(results[0].diagnostic!.disposition).toBe('downgraded')
-    // suggestedSection may be experience-ba for requirements/analyst signals
+    // suggestedSection may be experience-secondary for requirements/analyst signals
     expect(results[0].diagnostic!.attemptedSection).toBe('')  // stamped by caller
   })
 })
@@ -714,7 +714,7 @@ describe('claim validator: disallowed role source', () => {
 
 describe('claim validator: allowed role source', () => {
   it('a bullet whose evidenceRef resolves to a primary entry is allowed', () => {
-    const bundle = makeBundleFor('experience-po', [PO_ENTRY, BA_ENTRY])
+    const bundle = makeBundleFor('experience-primary', [PO_ENTRY, BA_ENTRY])
     const bullet = makeRawBullet(
       'Owned backlog and sprint ceremonies for the Calendar Platform.',
       'supported',
@@ -727,7 +727,7 @@ describe('claim validator: allowed role source', () => {
   })
 
   it('bullet with no evidenceRef is allowed (cannot determine scope)', () => {
-    const bundle = makeBundleFor('experience-po', [PO_ENTRY])
+    const bundle = makeBundleFor('experience-primary', [PO_ENTRY])
     const bullet = makeRawBullet('Delivered roadmap milestones on time.', 'supported', undefined)
     const results = validateSectionClaims([bullet], bundle)
     expect(results[0].disposition).toBe('allowed')
@@ -738,7 +738,7 @@ describe('claim validator: allowed role source', () => {
 
 describe('claim validator: cross-role framing', () => {
   it('cross-role claim WITH prior-background framing is allowed (requires-framing)', () => {
-    const bundle = makeBundleFor('experience-po', [PO_ENTRY, BA_ENTRY])
+    const bundle = makeBundleFor('experience-primary', [PO_ENTRY, BA_ENTRY])
     const bullet = makeRawBullet(
       'Building on prior background as a Product Analyst, applied requirements expertise to PO backlog grooming.',
       'supported-with-reframing',
@@ -750,7 +750,7 @@ describe('claim validator: cross-role framing', () => {
   })
 
   it('cross-role claim WITHOUT framing is downgraded', () => {
-    const bundle = makeBundleFor('experience-po', [PO_ENTRY, BA_ENTRY])
+    const bundle = makeBundleFor('experience-primary', [PO_ENTRY, BA_ENTRY])
     const bullet = makeRawBullet(
       'Authored business requirements and managed acceptance criteria.',
       'supported',
@@ -765,16 +765,16 @@ describe('claim validator: cross-role framing', () => {
 // â”€â”€â”€ Test 24: Bridge answer scoped to correct sections only â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('bridge answer scope enforcement', () => {
-  it('bridge answer for experience-po is not included in experience-ba bundle', () => {
+  it('bridge answer for experience-primary is not included in experience-secondary bundle', () => {
     const q = makeBridgeQuestion({
-      affectedArtifactSection: 'experience-po',
+      affectedArtifactSection: 'experience-primary',
       type: 'evidence',
       status: 'answered',
       userAnswer: 'I owned the Calendar Platform product backlog.',
     })
-    const bundle = makeBundleFor('experience-ba', [BA_ENTRY], [q])
-    // experience-ba scope requires allowedBridgeQuestionTypes to include 'evidence'
-    // but crossRolePolicy='explicit-framing-required' â†’ only 'experience-ba' or high-pri summary
+    const bundle = makeBundleFor('experience-secondary', [BA_ENTRY], [q])
+    // experience-secondary scope requires allowedBridgeQuestionTypes to include 'evidence'
+    // but crossRolePolicy='explicit-framing-required' â†’ only 'experience-secondary' or high-pri summary
     const allBridgeIds = [
       ...bundle.normalizedBridgeEvidence.map(n => n.questionId),
       ...bundle.uncertainBridgeEvidence.map(n => n.questionId),
@@ -782,14 +782,14 @@ describe('bridge answer scope enforcement', () => {
     expect(allBridgeIds).not.toContain(q.id)
   })
 
-  it('bridge answer for experience-ba IS included in experience-ba bundle', () => {
+  it('bridge answer for experience-secondary IS included in experience-secondary bundle', () => {
     const q = makeBridgeQuestion({
-      affectedArtifactSection: 'experience-ba',
+      affectedArtifactSection: 'experience-secondary',
       type: 'evidence',
       status: 'answered',
       userAnswer: 'I documented user stories and acceptance criteria for Salesforce integration.',
     })
-    const bundle = makeBundleFor('experience-ba', [BA_ENTRY], [q])
+    const bundle = makeBundleFor('experience-secondary', [BA_ENTRY], [q])
     const allBridgeIds = [
       ...bundle.normalizedBridgeEvidence.map(n => n.questionId),
       ...bundle.uncertainBridgeEvidence.map(n => n.questionId),
@@ -803,24 +803,24 @@ describe('bridge answer scope enforcement', () => {
 describe('bridge answer normalization: uncertainty', () => {
   it('"I\'m not sure" answer is in uncertainBridgeEvidence, not normalizedBridgeEvidence', () => {
     const q = makeBridgeQuestion({
-      affectedArtifactSection: 'experience-qa',
+      affectedArtifactSection: 'experience-supporting',
       type: 'evidence',
       status: 'answered',
       userAnswer: "I'm not sure I have direct experience with that.",
     })
-    const bundle = makeBundleFor('experience-qa', [QA_ENTRY], [q])
+    const bundle = makeBundleFor('experience-supporting', [QA_ENTRY], [q])
     expect(bundle.uncertainBridgeEvidence.map(n => n.questionId)).toContain(q.id)
     expect(bundle.normalizedBridgeEvidence.map(n => n.questionId)).not.toContain(q.id)
   })
 
   it('confident answer is in normalizedBridgeEvidence', () => {
     const q = makeBridgeQuestion({
-      affectedArtifactSection: 'experience-qa',
+      affectedArtifactSection: 'experience-supporting',
       type: 'evidence',
       status: 'answered',
       userAnswer: 'I wrote SpecFlow feature files and automated regression suites for 3 product lines.',
     })
-    const bundle = makeBundleFor('experience-qa', [QA_ENTRY], [q])
+    const bundle = makeBundleFor('experience-supporting', [QA_ENTRY], [q])
     expect(bundle.normalizedBridgeEvidence.map(n => n.questionId)).toContain(q.id)
     expect(bundle.uncertainBridgeEvidence.map(n => n.questionId)).not.toContain(q.id)
   })
@@ -847,11 +847,11 @@ describe('claim validator: unsupported claims in skills section', () => {
 // â”€â”€â”€ Test 27: Unsupported claims downgraded (not excluded) in experience sections
 
 describe('claim validator: unsupported in experience sections', () => {
-  it('unsupported claim in experience-po is NOT blocked â€” it surfaces for user review', () => {
-    const bundle = makeBundleFor('experience-po', [PO_ENTRY])
+  it('unsupported claim in experience-primary is NOT blocked â€” it surfaces for user review', () => {
+    const bundle = makeBundleFor('experience-primary', [PO_ENTRY])
     const bullet = makeRawBullet('Led enterprise Salesforce rollout.', 'unsupported', undefined)
     const results = validateSectionClaims([bullet], bundle)
-    // experience-po allows unsupported â€” should be 'allowed', not 'blocked'
+    // experience-primary allows unsupported â€” should be 'allowed', not 'blocked'
     expect(results[0].disposition).toBe('allowed')
     expect(results[0].correctedClaimStatus).toBe('unsupported')
   })
@@ -860,8 +860,8 @@ describe('claim validator: unsupported in experience sections', () => {
 // â”€â”€â”€ Test 28: Disallowed pattern produces diagnostic with suggestedSection â”€â”€â”€â”€
 
 describe('claim validator: disallowed pattern diagnostic', () => {
-  it('PO disallowed pattern produces diagnostic pointing toward experience-ba', () => {
-    const bundle = makeBundleFor('experience-po', [PO_ENTRY, BA_ENTRY])
+  it('PO disallowed pattern produces diagnostic pointing toward experience-secondary', () => {
+    const bundle = makeBundleFor('experience-primary', [PO_ENTRY, BA_ENTRY])
     const bullet = makeRawBullet(
       'Managed 3,000+ Salesforce client requests from enterprise HCM clients.',
       'supported',
@@ -872,12 +872,12 @@ describe('claim validator: disallowed pattern diagnostic', () => {
     const diag = results[0].diagnostic!
     expect(diag).not.toBeNull()
     expect(diag.reason).toContain('3,000+ salesforce')
-    // The heuristic should suggest experience-ba for Salesforce/triage language
-    expect(diag.suggestedSection).toBe('experience-ba')
+    // The heuristic should suggest experience-secondary for Salesforce/triage language
+    expect(diag.suggestedSection).toBe('experience-secondary')
   })
 
   it('QA disallowed pattern (roadmap ownership) produces diagnostic', () => {
-    const bundle = makeBundleFor('experience-qa', [QA_ENTRY, PO_ENTRY])
+    const bundle = makeBundleFor('experience-supporting', [QA_ENTRY, PO_ENTRY])
     const bullet = makeRawBullet(
       'Led product roadmap ownership for Calendar Platform delivery.',
       'supported',
@@ -900,9 +900,9 @@ describe('global gap warning deduplication', () => {
   it('same global warning from multiple sections is shown once in UI state', () => {
     const warning = 'Insurance domain not evidenced in work history.'
     const sections = new Map<SectionType, ArtifactSection>([
-      ['experience-po', makeSection({ type: 'experience-po', evidenceWarnings: [warning, 'Missing sprint metrics'] })],
-      ['experience-ba', makeSection({ type: 'experience-ba', evidenceWarnings: [warning, 'Missing BA domain evidence'] })],
-      ['experience-qa', makeSection({ type: 'experience-qa', evidenceWarnings: [warning] })],
+      ['experience-primary', makeSection({ type: 'experience-primary', evidenceWarnings: [warning, 'Missing sprint metrics'] })],
+      ['experience-secondary', makeSection({ type: 'experience-secondary', evidenceWarnings: [warning, 'Missing BA domain evidence'] })],
+      ['experience-supporting', makeSection({ type: 'experience-supporting', evidenceWarnings: [warning] })],
     ])
     const seen = new Set<string>()
     const globalWarnings: string[] = []
@@ -924,7 +924,7 @@ describe('global gap warning deduplication', () => {
 
 describe('source scope: allowed claims have in-scope source mappings', () => {
   it('only bullets with inScopeEntry=true contribute to clean source mappings', () => {
-    const bundle = makeBundleFor('experience-po', [PO_ENTRY, BA_ENTRY])
+    const bundle = makeBundleFor('experience-primary', [PO_ENTRY, BA_ENTRY])
     const bullets = [
       makeRawBullet('Owned Calendar Platform backlog.', 'supported', 'Product Owner at SaaS Co'),
       makeRawBullet('Managed requirements.', 'supported', 'Product Analyst at SaaS Co'),
@@ -940,7 +940,7 @@ describe('source scope: allowed claims have in-scope source mappings', () => {
 
   it('bridge answer normalization includes forbidden overclaim for Postman usage', () => {
     const q = makeBridgeQuestion({
-      affectedArtifactSection: 'experience-qa',
+      affectedArtifactSection: 'experience-supporting',
       type: 'evidence',
       status: 'answered',
       userAnswer: 'I used Postman to validate API endpoints during UAT testing.',
@@ -968,7 +968,7 @@ describe('partition enforcement: wrong-role claims excluded from primary display
   it('a Product Owner sourced bullet is not in display partition of QA section', () => {
     const results = validateAndPartition(
       [makeRawBullet('Owned Calendar Platform backlog and sprint ceremonies.', 'supported', 'Product Owner at SaaS Co')],
-      'experience-qa',
+      'experience-supporting',
       [PO_ENTRY, QA_ENTRY]
     )
     expect(results[0].partition).not.toBe('display')
@@ -979,7 +979,7 @@ describe('partition enforcement: wrong-role claims excluded from primary display
   it('a QA sourced bullet is not in display partition of PO section', () => {
     const results = validateAndPartition(
       [makeRawBullet('Authored SpecFlow tests reducing regression defect rate by 40%.', 'supported', 'Lead QA Analyst at SaaS Co')],
-      'experience-po',
+      'experience-primary',
       [PO_ENTRY, QA_ENTRY]
     )
     expect(results[0].partition).not.toBe('display')
@@ -988,7 +988,7 @@ describe('partition enforcement: wrong-role claims excluded from primary display
   it('a Product Analyst sourced bullet is not in display partition of PO section', () => {
     const results = validateAndPartition(
       [makeRawBullet('Triaged 3,000+ Salesforce client requests.', 'supported', 'Product Analyst at SaaS Co')],
-      'experience-po',
+      'experience-primary',
       [PO_ENTRY, BA_ENTRY]
     )
     expect(results[0].partition).not.toBe('display')
@@ -1005,7 +1005,7 @@ describe('partition enforcement: cross-role with framing â†’ needs-confirma
         'supported-with-reframing',
         'Product Analyst at SaaS Co'
       )],
-      'experience-po',
+      'experience-primary',
       [PO_ENTRY, BA_ENTRY]
     )
     expect(results[0].partition).toBe('needs-confirmation')
@@ -1016,7 +1016,7 @@ describe('partition enforcement: cross-role with framing â†’ needs-confirma
 
 describe('partition enforcement: needs-user-confirmation â†’ not display', () => {
   it('a bullet with correctedClaimStatus=needs-user-confirmation goes to needs-confirmation partition', () => {
-    const bundle = makeBundleFor('experience-po', [PO_ENTRY, BA_ENTRY])
+    const bundle = makeBundleFor('experience-primary', [PO_ENTRY, BA_ENTRY])
     // Bullet evidenceRef resolves to supporting entry (BA) without framing â†’ downgraded to needs-user-confirmation
     const bullet = makeRawBullet('Managed requirements and acceptance criteria.', 'supported', 'Product Analyst at SaaS Co')
     const results = validateSectionClaims([bullet], bundle)
@@ -1036,11 +1036,11 @@ describe('partition enforcement: unsupported claims excluded', () => {
     expect(results[0].partition).not.toBe('display')
   })
 
-  it('an unsupported bullet in experience-po is excluded (not display)', () => {
-    const bundle = makeBundleFor('experience-po', [PO_ENTRY])
+  it('an unsupported bullet in experience-primary is excluded (not display)', () => {
+    const bundle = makeBundleFor('experience-primary', [PO_ENTRY])
     const bullet = makeRawBullet('Led enterprise Salesforce rollout.', 'unsupported', 'Product Owner at SaaS Co')
     const results = validateSectionClaims([bullet], bundle)
-    // experience-po allows 'unsupported' in allowedClaimStatuses, but claimStatus=unsupported
+    // experience-primary allows 'unsupported' in allowedClaimStatuses, but claimStatus=unsupported
     // maps to 'excluded' via mapResultToPartition Rule (allowed + unsupported â†’ excluded)
     expect(results[0].partition).toBe('excluded')
   })
@@ -1086,7 +1086,7 @@ describe('export readiness: non-display claims do not contribute to exported con
       makeRawBullet('Owned PO backlog.', 'supported', 'Product Owner at SaaS Co'),
       makeRawBullet('Prior background: applied BA skills.', 'supported-with-reframing', 'Product Analyst at SaaS Co'),
     ]
-    const bundle = makeBundleFor('experience-po', [PO_ENTRY, BA_ENTRY])
+    const bundle = makeBundleFor('experience-primary', [PO_ENTRY, BA_ENTRY])
     const results = validateSectionClaims(bullets, bundle)
 
     const displayCount = results.filter(r => r.partition === 'display').length
@@ -1109,7 +1109,7 @@ describe('partition distinctness: display and non-display are mutually exclusive
         makeRawBullet('Triaged Salesforce requests.', 'supported', 'Product Analyst at SaaS Co'),
         makeRawBullet('Unsupported insurance claim.', 'unsupported', undefined),
       ],
-      'experience-po',
+      'experience-primary',
       [PO_ENTRY, BA_ENTRY]
     )
 
@@ -1130,9 +1130,9 @@ describe('partition distinctness: display and non-display are mutually exclusive
 // â”€â”€â”€ Test 40: Accepted sections elsewhere are preserved on regeneration â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('partition: accepted section preservation during peer regeneration', () => {
-  it('regenerating experience-ba does not change the partition of accepted experience-po bullets', () => {
+  it('regenerating experience-secondary does not change the partition of accepted experience-primary bullets', () => {
     const acceptedSection = makeSection({
-      type: 'experience-po',
+      type: 'experience-primary',
       status: 'accepted',
       bullets: [
         { id: nanoid(), text: 'Owned Calendar Platform.', claimStatus: 'supported',
@@ -1140,17 +1140,17 @@ describe('partition: accepted section preservation during peer regeneration', ()
       ]
     })
     // Simulate a new BA section being generated
-    const newBASection = makeSection({ type: 'experience-ba', status: 'generated' })
+    const newBASection = makeSection({ type: 'experience-secondary', status: 'generated' })
     const sections = new Map<SectionType, ArtifactSection>([
-      ['experience-po', acceptedSection],
-      ['experience-ba', newBASection],
+      ['experience-primary', acceptedSection],
+      ['experience-secondary', newBASection],
     ])
-    const after = new Map(sections).set('experience-ba', newBASection)
+    const after = new Map(sections).set('experience-secondary', newBASection)
 
     // PO section is untouched
-    const poBullets = after.get('experience-po')!.bullets
+    const poBullets = after.get('experience-primary')!.bullets
     expect(poBullets.every(b => (b.partition ?? 'display') === 'display')).toBe(true)
-    expect(after.get('experience-po')!.status).toBe('accepted')
+    expect(after.get('experience-primary')!.status).toBe('accepted')
   })
 })
 

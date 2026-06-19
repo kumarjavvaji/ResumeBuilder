@@ -139,18 +139,18 @@ export function extractEvidenceKeywords(text: string): string[] {
 
 function roleTitleToSections(title: string): SectionType[] {
   const lower = title.toLowerCase()
-  if (/analyst|ba\b|business analyst|product analyst|data analyst/i.test(lower)) return ['experience-ba']
-  if (/owner|product manager|pm\b|program manager/i.test(lower)) return ['experience-po']
-  if (/qa\b|quality|test engineer|tester/i.test(lower)) return ['experience-qa']
-  return ['experience-ba', 'experience-po', 'experience-qa']
+  if (/analyst|ba\b|business analyst|product analyst|data analyst/i.test(lower)) return ['experience-secondary']
+  if (/owner|product manager|pm\b|program manager/i.test(lower)) return ['experience-primary']
+  if (/qa\b|quality|test engineer|tester/i.test(lower)) return ['experience-supporting']
+  return ['experience-secondary', 'experience-primary', 'experience-supporting']
 }
 
 function bridgeSectionHint(q: BridgeQuestion): SectionType[] {
   const af = (q.affectedArtifactSection ?? '').toLowerCase()
-  if (af.includes('ba') || af.includes('analyst')) return ['experience-ba']
-  if (af.includes('po') || af.includes('owner')) return ['experience-po']
-  if (af.includes('qa') || af.includes('quality')) return ['experience-qa']
-  return ['experience-ba', 'experience-po', 'experience-qa']
+  if (af.includes('ba') || af.includes('analyst')) return ['experience-secondary']
+  if (af.includes('po') || af.includes('owner')) return ['experience-primary']
+  if (af.includes('supporting') || af.includes('quality')) return ['experience-supporting']
+  return ['experience-secondary', 'experience-primary', 'experience-supporting']
 }
 
 // ─── Main builder ─────────────────────────────────────────────────────────────
@@ -228,7 +228,7 @@ export function buildQualifiedEvidenceCards(
           ? []
           : [`presenting metric from ${entry.title} as current-role result`],
         boundaries: [],
-        useInSections: ['experience-ba', 'experience-po', 'experience-qa', 'summary'],
+        useInSections: ['experience-secondary', 'experience-primary', 'experience-supporting', 'summary'],
         avoidInSections: [],
         notesForGenerator: `Approved metric from ${entry.title} — use exactly as stated, do not inflate.`,
       })
@@ -289,7 +289,7 @@ export function buildQualifiedEvidenceCards(
           ? ['skills', 'talking-points']
           : affectedSections,
       avoidInSections: isLearningOnly || isNegative
-        ? ['experience-po', 'experience-ba', 'experience-qa']
+        ? ['experience-primary', 'experience-secondary', 'experience-supporting']
         : [],
       notesForGenerator: isNegative
         ? `User expressed no experience or denied — do not generate any resume claim from this.`

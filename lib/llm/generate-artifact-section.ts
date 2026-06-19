@@ -189,7 +189,7 @@ export async function generateArtifactSection(opts: GenerateOptions): Promise<Ge
   // For bullet sections, reconstruct content from display-partition bullets only.
   // This ensures the stored content is export-safe and matches what the user sees.
   const isBulletSection = [
-    'experience-po', 'experience-ba', 'experience-qa', 'talking-points'
+    'experience-primary', 'experience-secondary', 'experience-supporting', 'talking-points'
   ].includes(sectionType)
   const displayBullets = finalBullets.filter(b => b.partition === 'display')
   const content = isBulletSection && displayBullets.length > 0
@@ -284,9 +284,9 @@ function buildSystemPrompt(
   const typeInstructions: Record<SectionType, string> = {
     summary: 'Write a compact 3-4 line professional summary. Keep it positioning-level; Experience bullets carry proof details, metrics, tools, cadence, and team sizes. No generic opener or puff language.',
     skills: 'Output compact grouped skill rows from the candidate skillGroups. Format each row as Heading: Skill One, Skill Two. No star ratings, generic soft skills, unsupported tools, or invented skills.',
-    'experience-po': 'Write 3-5 impact-first Product Owner bullets grounded in real work evidence. Emphasize backlog ownership, sprint delivery, stakeholder alignment, prioritization, and outcomes.',
-    'experience-ba': 'Write 3-5 impact-first Product Analyst or Business Analyst bullets grounded in real work evidence. Emphasize requirements, gap analysis, acceptance criteria, UAT, documentation, and release readiness.',
-    'experience-qa': 'Write 3-5 impact-first QA or quality bullets grounded in real work evidence. For product roles, keep QA supportive rather than dominant.',
+    'experience-primary': 'Write 3-5 impact-first bullets for the primary work history role, grounded in real evidence from that work entry. Emphasize scope, outcomes, and the specific value this role delivered.',
+    'experience-secondary': 'Write 3-5 impact-first bullets for the secondary work history role, grounded in real evidence from that entry. Emphasize supporting contributions, analysis, requirements, or delivery — appropriate to this role\'s scope.',
+    'experience-supporting': 'Write 3-5 impact-first bullets for the supporting work history role, grounded in real evidence from that entry. Keep this section focused and non-dominant relative to the primary role.',
     'cover-letter': `Write a cover letter that does NOT recap the resume. Explain why this specific role at this company fits the candidate's career direction. Use the company context and fit hypothesis to ground the argument. 3 short paragraphs max.`,
     'referral-message': `Write a short, direct LinkedIn message to a potential referrer. 4–5 sentences. Personal, specific, no fluff.`,
     'recruiter-message': `Write a recruiter outreach message. 3–4 sentences. State the role, the fit, and ask for a conversation.`,
@@ -612,19 +612,20 @@ function buildQualityGateContextFromProfile(
 ): QualityGateContext {
   const ctx: QualityGateContext = {}
 
-  if (sectionType === 'experience-po') {
-    const poEntry = profile.workHistory.find(w => /product owner/i.test(w.title))
-    if (poEntry) {
-      const endLabel = poEntry.endDate === 'present' ? 'present' : poEntry.endDate
-      ctx.poDateRange = `${poEntry.startDate} – ${endLabel}`
-      ctx.verifiedMetrics = (poEntry.approvedMetrics ?? []).slice(0, 3)
+  if (sectionType === 'experience-primary') {
+    // Use the first work history entry as the primary role (or the most recent one)
+    const primaryEntry = profile.workHistory[0]
+    if (primaryEntry) {
+      const endLabel = primaryEntry.endDate === 'present' ? 'present' : primaryEntry.endDate
+      ctx.poDateRange = `${primaryEntry.startDate} – ${endLabel}`
+      ctx.verifiedMetrics = (primaryEntry.approvedMetrics ?? []).slice(0, 3)
     }
   }
 
   if (sectionType === 'summary') {
     const jdText = [...jdMap.required, ...jdMap.niceToHave].map(r => r.text).join(' ').toLowerCase()
     const primaryKeywords = ['product owner', 'product manager', 'business analyst',
-      'product analyst', 'systems analyst', 'data analyst', 'qa', 'quality']
+      'product analyst', 'systems analyst', 'data analyst', 'supporting', 'quality']
     const seen = new Set<string>()
     const excluded: string[] = []
     for (const w of profile.workHistory) {
@@ -656,7 +657,7 @@ function formatSkillsForPrompt(profile: UserProfile): string[] {
 
 function buildToolSchema(type: SectionType) {
   const hasBullets = [
-    'experience-po', 'experience-ba', 'experience-qa', 'talking-points'
+    'experience-primary', 'experience-secondary', 'experience-supporting', 'talking-points'
   ].includes(type)
 
   return {

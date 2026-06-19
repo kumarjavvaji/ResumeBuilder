@@ -87,10 +87,10 @@ function targetMatchesRoleFamily(input: BuildResumeStrategyBriefInput, roleFamil
     typeof input.blueprint === 'string' ? '' : input.blueprint?.targetPosture,
   ].filter(Boolean).join(' ').toLowerCase()
 
-  if (roleFamily === 'product_owner') return /\b(product owner|po|scrum product owner)\b/.test(targetText)
-  if (roleFamily === 'product_analyst') return /\b(product analyst)\b/.test(targetText)
-  if (roleFamily === 'associate_pm') return /\b(associate product manager|apm)\b/.test(targetText)
-  if (roleFamily === 'business_analyst') return /\b(business analyst|ba)\b/.test(targetText)
+  if (roleFamily === 'primary') return /\b(product owner|po|scrum product owner)\b/.test(targetText)
+  if (roleFamily === 'secondary') return /\b(product analyst)\b/.test(targetText)
+  if (roleFamily === 'primary') return /\b(associate product manager|apm)\b/.test(targetText)
+  if (roleFamily === 'secondary') return /\b(business analyst|ba)\b/.test(targetText)
   if (roleFamily === 'it_product') return /\b(it product|technology product|product management|product role)\b/.test(targetText)
   return targetText.includes(roleFamily.replace(/_/g, ' '))
 }

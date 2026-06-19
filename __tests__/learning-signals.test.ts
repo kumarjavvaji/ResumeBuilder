@@ -55,7 +55,7 @@ describe('learning signal persistence', () => {
       content: 'Reduced deploy time by 40% through CI/CD pipeline automation.',
       context: 'Product Owner at Acme',
       roleCategory: 'PO',
-      sectionType: 'experience-po'
+      sectionType: 'experience-primary'
     })
     expect(signal.id).toBeTruthy()
     expect(signal.createdAt).toBeTruthy()

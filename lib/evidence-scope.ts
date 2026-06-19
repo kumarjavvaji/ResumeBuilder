@@ -74,60 +74,54 @@ export const SECTION_EVIDENCE_SCOPES: Record<SectionType, SectionEvidenceScope> 
     disallowedClaimPatterns: [],
     framingNote: null,
   },
-  'experience-po': {
-    sectionType: 'experience-po',
-    roleTitleKeywords: ['product owner', 'product manager', 'program manager'],
+  'experience-primary': {
+    sectionType: 'experience-primary',
+    roleTitleKeywords: [],  // populated dynamically from the target role title at session start
     allowedEvidenceTypes: ['work-history-bullet', 'approved-metric', 'bridge-answer'],
     allowedBridgeQuestionTypes: ['evidence', 'metric', 'emphasis', 'underused-experience'],
     allowedClaimStatuses: ['supported', 'supported-with-reframing', 'needs-user-confirmation', 'unsupported'],
     crossRolePolicy: 'explicit-framing-required',
     requiredFramingRules: [
-      'Non-PO role evidence must be explicitly framed as prior background, earlier experience, or cross-functional context.',
-      'Prior-role metrics must not appear as PO accomplishments — cite only evidence from the PO work entry.',
+      'Evidence from other roles must be explicitly framed as prior background, earlier experience, or cross-functional context.',
+      'Prior-role metrics must not appear as primary-role accomplishments — cite only evidence from the matching work entry.',
     ],
     disallowedClaimPatterns: [],
-    framingNote: `Role scope: Work entries under "Prior background" belong to other roles (BA/QA). If referenced, MUST frame as prior experience or earlier-career context — never as current PO work. Prior-role metrics must not be presented as PO accomplishments.`,
+    framingNote: `Role scope: Work entries under "Prior background" belong to other roles. If referenced, MUST frame as prior experience or earlier-career context — never as primary-role work. Prior-role metrics must not be presented as primary-role accomplishments.`,
   },
-  'experience-ba': {
-    sectionType: 'experience-ba',
-    roleTitleKeywords: [
-      'business analyst', 'product analyst', 'systems analyst',
-      'data analyst', 'requirements analyst', 'functional analyst',
-    ],
+  'experience-secondary': {
+    sectionType: 'experience-secondary',
+    roleTitleKeywords: [],  // populated dynamically
     allowedEvidenceTypes: ['work-history-bullet', 'approved-metric', 'bridge-answer'],
     allowedBridgeQuestionTypes: ['gap', 'evidence', 'metric', 'domain-translation', 'underused-experience'],
     allowedClaimStatuses: ['supported', 'supported-with-reframing', 'needs-user-confirmation', 'unsupported'],
     crossRolePolicy: 'explicit-framing-required',
     requiredFramingRules: [
-      'Product Owner evidence must be framed as later-career progression or cross-functional context.',
-      'Do not claim end-to-end roadmap ownership as BA/PA work.',
+      'Primary-role evidence must be framed as later-career progression or cross-functional context.',
+      'Do not claim responsibilities that belong to the primary or senior role unless directly evidenced.',
     ],
     disallowedClaimPatterns: [
       'end-to-end roadmap ownership',
       'owned the product roadmap',
       'product roadmap ownership',
     ],
-    framingNote: `Role scope: Work entries under "Prior background" belong to other roles (PO/QA). PO entries may only be referenced as later-career progression or cross-functional context — never as BA/PA role history. Do not claim product roadmap ownership as BA/PA work.`,
+    framingNote: `Role scope: Work entries under "Prior background" belong to other roles. They may only be referenced as earlier-career context — never as the secondary role's own history. Do not claim responsibilities that belong to a more senior role.`,
   },
-  'experience-qa': {
-    sectionType: 'experience-qa',
-    roleTitleKeywords: [
-      'qa', 'quality assurance', 'quality analyst', 'quality engineer',
-      'test engineer', 'tester', 'qe',
-    ],
+  'experience-supporting': {
+    sectionType: 'experience-supporting',
+    roleTitleKeywords: [],  // populated dynamically
     allowedEvidenceTypes: ['work-history-bullet', 'approved-metric', 'bridge-answer'],
     allowedBridgeQuestionTypes: ['gap', 'evidence', 'metric', 'domain-translation', 'underused-experience'],
     allowedClaimStatuses: ['supported', 'supported-with-reframing', 'needs-user-confirmation', 'unsupported'],
     crossRolePolicy: 'explicit-framing-required',
     requiredFramingRules: [
-      'Non-QA evidence must be tied to quality validation, testing, security escalation, or release readiness.',
-      'Roadmap ownership, backlog management, and product strategy must not appear as QA accomplishments.',
+      'Non-supporting-role evidence must be tied to the supporting competency being demonstrated.',
+      'Primary-role responsibilities must not appear as supporting-role accomplishments.',
     ],
     disallowedClaimPatterns: [
       'product roadmap ownership',
       'roadmap ownership',
     ],
-    framingNote: `Role scope: Work entries under "Prior background" belong to other roles (PO/PA). Only reference them if directly demonstrating quality validation, testing, security escalation, or release readiness. Roadmap ownership and product strategy are not QA accomplishments.`,
+    framingNote: `Role scope: Work entries under "Prior background" belong to other roles. Only reference them if directly demonstrating the supporting competency. Primary-role responsibilities are not supporting-role accomplishments.`,
   },
   'cover-letter': {
     sectionType: 'cover-letter',
@@ -228,7 +222,7 @@ export interface ScopedEvidenceBundle {
 
 /**
  * Builds a scoped evidence bundle for a specific artifact section.
- * Role-specific sections (experience-po, -ba, -qa) split work history into
+ * Role-specific sections (experience-primary, -ba, -qa) split work history into
  * primary vs supporting. Cross-role sections receive full evidence.
  */
 export function buildScopedEvidenceBundle(
@@ -237,24 +231,33 @@ export function buildScopedEvidenceBundle(
   sectionType: SectionType
 ): ScopedEvidenceBundle {
   const scope = SECTION_EVIDENCE_SCOPES[sectionType]
-  const keywords = scope.roleTitleKeywords
 
-  // Split work history
-  const primaryWorkEntries = keywords.length === 0
-    ? profile.workHistory
-    : profile.workHistory.filter(w =>
-        keywords.some(kw => w.title.toLowerCase().includes(kw.toLowerCase()))
-      )
+  // For experience sections: use position-based work history splitting.
+  // Work history entry 0 = primary role, 1 = secondary role, 2+ = supporting.
+  // User controls which job goes where by ordering their work history.
+  let usePrimary: typeof profile.workHistory
+  let useSupporting: typeof profile.workHistory
 
-  const supportingWorkEntries = keywords.length === 0
-    ? []
-    : profile.workHistory.filter(w =>
-        !keywords.some(kw => w.title.toLowerCase().includes(kw.toLowerCase()))
-      )
+  if (sectionType === 'experience-primary') {
+    usePrimary = profile.workHistory.slice(0, 1)
+    useSupporting = profile.workHistory.slice(1)
+  } else if (sectionType === 'experience-secondary') {
+    usePrimary = profile.workHistory.slice(1, 2)
+    useSupporting = [...profile.workHistory.slice(0, 1), ...profile.workHistory.slice(2)]
+  } else if (sectionType === 'experience-supporting') {
+    usePrimary = profile.workHistory.slice(2)
+    useSupporting = profile.workHistory.slice(0, 2)
+  } else {
+    // Non-experience sections: all work history available
+    usePrimary = profile.workHistory
+    useSupporting = []
+  }
 
-  // Fallback: if keyword matching yielded no primary entries, use all entries
-  const usePrimary = primaryWorkEntries.length > 0 ? primaryWorkEntries : profile.workHistory
-  const useSupporting = primaryWorkEntries.length > 0 ? supportingWorkEntries : []
+  // Fallback: if position-based split yielded nothing, use all entries
+  if (usePrimary.length === 0) {
+    usePrimary = profile.workHistory
+    useSupporting = []
+  }
 
   // Normalize and scope bridge questions
   const allAnswered = bridgeQuestions.filter(q => q.status === 'answered')
@@ -289,7 +292,7 @@ export function buildScopedEvidenceBundle(
 /**
  * Derives disallowed claim patterns for a section from the active user profile.
  *
- * For role-specific sections (experience-po, -ba, -qa) the approved metrics from
+ * For role-specific sections (experience-primary, -secondary, -supporting) the approved metrics from
  * NON-primary roles must not bleed into that section's bullets. This replaces
  * the previous approach of hardcoding personal metric strings in SECTION_EVIDENCE_SCOPES.
  *
@@ -297,12 +300,21 @@ export function buildScopedEvidenceBundle(
  * disallowed patterns without any source changes.
  */
 export function buildDynamicDisallowedPatterns(profile: UserProfile, sectionType: SectionType): string[] {
-  const scope = SECTION_EVIDENCE_SCOPES[sectionType]
-  if (scope.roleTitleKeywords.length === 0) return []
+  // Only apply cross-role metric contamination detection for role-scoped sections
+  if (!sectionType.startsWith('experience-')) return []
 
-  const nonPrimaryEntries = profile.workHistory.filter(
-    w => !scope.roleTitleKeywords.some(kw => w.title.toLowerCase().includes(kw.toLowerCase()))
-  )
+  // Determine which work entries are NOT the primary for this section
+  // (mirrors the position-based logic in buildScopedEvidenceBundle)
+  let nonPrimaryEntries: typeof profile.workHistory
+  if (sectionType === 'experience-primary') {
+    nonPrimaryEntries = profile.workHistory.slice(1)
+  } else if (sectionType === 'experience-secondary') {
+    nonPrimaryEntries = [...profile.workHistory.slice(0, 1), ...profile.workHistory.slice(2)]
+  } else if (sectionType === 'experience-supporting') {
+    nonPrimaryEntries = profile.workHistory.slice(0, 2)
+  } else {
+    return []
+  }
 
   const patterns: string[] = []
   for (const entry of nonPrimaryEntries) {
@@ -403,14 +415,9 @@ function inferApplicableSections(q: BridgeQuestion): SectionType[] {
 
 function inferApplicableRoles(q: BridgeQuestion): EmphasisCategory[] {
   const section = q.affectedArtifactSection
-  const roleMap: Record<string, EmphasisCategory[]> = {
-    'experience-po': ['PO'],
-    'experience-ba': ['BA'],
-    'experience-qa': ['QA'],
-  }
-  const declared = roleMap[section ?? '']
-  if (declared) return declared
-  return ['PO', 'BA', 'QA', 'AI', 'data', 'operations', 'blended']
+  // Return a single-item array matching the section, or empty meaning "all sections"
+  if (section && section.startsWith('experience-')) return [section]
+  return []
 }
 
 function buildForbiddenOverclaim(answer: string): string[] {

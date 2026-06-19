@@ -15,7 +15,8 @@ import type {
   CalibrationCandidate,
   CalibrationSynthesisRecord,
   AppliedCalibrationState,
-  ProfileSnapshot
+  ProfileSnapshot,
+  Stage1Job,
 } from '@/contracts'
 import { deriveStageStatuses } from '@/contracts'
 import { migrateToSkillGroups } from '@/lib/skills/classify'
@@ -37,6 +38,7 @@ export class ResumeBuilderDB extends Dexie {
   calibrationSyntheses!: Table<CalibrationSynthesisRecord>
   appliedCalibrationStates!: Table<AppliedCalibrationState>
   profileSnapshots!: Table<ProfileSnapshot>
+  stage1Jobs!: Table<Stage1Job>
 
   constructor() {
     super('resume-builder')
@@ -119,6 +121,11 @@ export class ResumeBuilderDB extends Dexie {
     //     profileId is always 'primary' (singleton user). version increments on each intake.
     this.version(9).stores({
       profileSnapshots: 'profileId, version, isActive'
+    })
+
+    // v11: adds stage1Jobs table for persisted multi-pass Stage 1 execution.
+    this.version(11).stores({
+      stage1Jobs: 'id, status, createdAt',
     })
 
     // v10: adds artifactHistory table for accepted/rejected resume content.

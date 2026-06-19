@@ -1,9 +1,9 @@
-﻿/**
+/**
  * ResumeGenerationContract tests.
  *
  * A. Section balance â€” sectionPlan limits derived correctly
  * B. Banned phrases â€” present in bannedPhrases + preferredReplacements
- * C. Session direction â€” representPrimaryPO, azureDevOpsAllowed, salesforcePreferredPhrase
+ * C. Session direction â€” representPrimaryRole, azureDevOpsAllowed, salesforcePreferredPhrase
  * D. JD theme placement â€” requiredBulletThemes derived from JD; validateResumeAgainstContract reports missing
  * E. Refinement contract reuse â€” serializeContractForPrompt produces correct prompt block
  * F. Deterministic repairs â€” applyDeterministicRepairs removes banned content
@@ -130,34 +130,34 @@ describe('A. Section balance', () => {
     expect(c.sectionPlan.skills.maxRows).toBe(5)
   })
 
-  it('A3: productOwner min 5, max 6 bullets for product_owner role', () => {
+  it('A3: primaryRole min 5, max 6 bullets for primary role', () => {
     const c = buildResumeGenerationContract(makeInput())
-    expect(c.sectionPlan.productOwner.minBullets).toBe(5)
-    expect(c.sectionPlan.productOwner.maxBullets).toBe(6)
+    expect(c.sectionPlan.primaryRole.minBullets).toBe(5)
+    expect(c.sectionPlan.primaryRole.maxBullets).toBe(6)
   })
 
-  it('A4: productAnalyst min 4, max 5 bullets for product_owner role', () => {
+  it('A4: secondaryRole min 4, max 5 bullets for primary role', () => {
     const c = buildResumeGenerationContract(makeInput())
-    expect(c.sectionPlan.productAnalyst.minBullets).toBe(4)
-    expect(c.sectionPlan.productAnalyst.maxBullets).toBe(5)
+    expect(c.sectionPlan.secondaryRole.minBullets).toBe(4)
+    expect(c.sectionPlan.secondaryRole.maxBullets).toBe(5)
   })
 
   it('A5: QA max 4 bullets for non-QA product role (supporting only)', () => {
     const c = buildResumeGenerationContract(makeInput())
-    expect(c.sectionPlan.qa.maxBullets).toBe(4)
+    expect(c.sectionPlan.supportingRole.maxBullets).toBe(4)
   })
 
   it('A6: QA max 6 bullets when emphasis is QA', () => {
     const c = buildResumeGenerationContract(makeInput({ emphasisRecommendation: 'QA', roleTitle: 'QA Engineer' }))
-    expect(c.sectionPlan.qa.maxBullets).toBe(6)
-    expect(c.targetRoleFamily).toBe('qa')
+    expect(c.sectionPlan.supportingRole.maxBullets).toBe(6)
+    expect(c.targetRoleFamily).toBe('supporting')
   })
 
-  it('A7: associate_pm role family detected from title', () => {
+  it('A7: primary role family detected from product manager title', () => {
     const c = buildResumeGenerationContract(
       makeInput({ emphasisRecommendation: 'PO', roleTitle: 'Associate Product Manager' })
     )
-    expect(c.targetRoleFamily).toBe('associate_pm')
+    expect(c.targetRoleFamily).toBe('primary')
   })
 
   it('A8: validator flags Skills over maxRows', () => {
@@ -342,12 +342,12 @@ describe('B. Banned phrases', () => {
 // â”€â”€â”€ C. Session direction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('C. Session direction', () => {
-  it('C1: representPrimaryPO true when profile contains a Product Owner role', () => {
+  it('C1: representPrimaryRole true when profile contains a Product Owner role', () => {
     const c = buildResumeGenerationContract(makeInput())
-    expect(c.sessionDirection.representPrimaryPO).toBe(true)
+    expect(c.sessionDirection.representPrimaryRole).toBe(true)
   })
 
-  it('C2: representPrimaryPO false when profile has no PO work history', () => {
+  it('C2: representPrimaryRole false when profile has no PO work history', () => {
     const profile = makeProfile({
       workHistory: [
         {
@@ -366,15 +366,15 @@ describe('C. Session direction', () => {
     const c = buildResumeGenerationContract(
       makeInput({ overallRefinementPrompt: 'Focus on BA skills', profile, emphasisRecommendation: 'BA' })
     )
-    expect(c.sessionDirection.representPrimaryPO).toBe(false)
+    expect(c.sessionDirection.representPrimaryRole).toBe(false)
   })
 
-  it('C3: representPrimaryPO true when work history contains a Product Owner role', () => {
+  it('C3: representPrimaryRole true when work history contains a Product Owner role', () => {
     const c = buildResumeGenerationContract(
       makeInput({ overallRefinementPrompt: 'Highlight analytical skills only' })
     )
     // Profile has a Product Owner work entry
-    expect(c.sessionDirection.representPrimaryPO).toBe(true)
+    expect(c.sessionDirection.representPrimaryRole).toBe(true)
   })
 
   it('C4: avoidFormalTitleHedging is true when profile has primary PO role', () => {
@@ -399,14 +399,14 @@ describe('C. Session direction', () => {
     expect(c.sessionDirection.roadmapBoundary).toContain('leadership-sponsored')
   })
 
-  it('C8: targetRoleFamily is "product_owner" for PO emphasis', () => {
+  it('C8: targetRoleFamily is "primary" for product owner title', () => {
     const c = buildResumeGenerationContract(makeInput())
-    expect(c.targetRoleFamily).toBe('product_owner')
+    expect(c.targetRoleFamily).toBe('primary')
   })
 
-  it('C9: targetRoleFamily is "business_analyst" for BA emphasis', () => {
+  it('C9: targetRoleFamily is "secondary" for business analyst title', () => {
     const c = buildResumeGenerationContract(makeInput({ emphasisRecommendation: 'BA', roleTitle: 'Business Analyst' }))
-    expect(c.targetRoleFamily).toBe('business_analyst')
+    expect(c.targetRoleFamily).toBe('secondary')
   })
 
   it('C10: evidenceRouting["Azure DevOps"] is empty when not allowed', () => {
@@ -420,9 +420,9 @@ describe('C. Session direction', () => {
     expect(c.evidenceRouting['CSPO']).toContain('education')
   })
 
-  it('C12: roadmap ownership routed to experience-po', () => {
+  it('C12: roadmap ownership routed to experience-primary', () => {
     const c = buildResumeGenerationContract(makeInput())
-    expect(c.evidenceRouting['roadmap ownership']).toContain('experience-po')
+    expect(c.evidenceRouting['roadmap ownership']).toContain('experience-primary')
   })
 })
 
@@ -514,7 +514,7 @@ describe('E. Refinement contract reuse â€” serializeContractForPrompt', () 
   it('E1: serialized block contains role family', () => {
     const c = buildResumeGenerationContract(makeInput())
     const prompt = serializeContractForPrompt(c)
-    expect(prompt).toContain('product_owner')
+    expect(prompt).toContain('primary')
   })
 
   it('E2: serialized block contains section limits', () => {

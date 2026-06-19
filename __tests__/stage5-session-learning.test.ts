@@ -92,7 +92,7 @@ function bridgeQuestions(): BridgeQuestion[] {
       question: 'Describe Postman API work.',
       type: 'evidence',
       priority: 'high',
-      affectedArtifactSection: 'experience-qa',
+      affectedArtifactSection: 'experience-supporting',
       status: 'answered',
       userAnswer: 'I used Postman to validate API endpoints, not author specifications.',
       createdAt: '2026-01-01T00:00:00.000Z'
@@ -103,7 +103,7 @@ function bridgeQuestions(): BridgeQuestion[] {
       question: 'Do you have insurance coverages experience?',
       type: 'domain-translation',
       priority: 'high',
-      affectedArtifactSection: 'experience-ba',
+      affectedArtifactSection: 'experience-secondary',
       status: 'answered',
       userAnswer: 'I am not sure and do not have direct insurance billing experience.',
       createdAt: '2026-01-01T00:00:00.000Z'
@@ -146,7 +146,7 @@ function artifactSections(): ArtifactSection[] {
   return [
     section('summary', { content: 'SI BA alignment anchored on requirements translation.' }),
     section('skills', { content: 'Analysis: Requirements, Gap Analysis\nData: SQL, Pendo' }),
-    section('experience-ba', {
+    section('experience-secondary', {
       bullets: [
         bullet('Translated support signals into requirements and gap-analysis priorities.'),
         bullet('Needs confirmation claim.', { partition: 'needs-confirmation' })
@@ -164,18 +164,18 @@ function artifactSections(): ArtifactSection[] {
         }]
       },
       blockedClaimDiagnostics: [{
-        attemptedSection: 'experience-ba',
+        attemptedSection: 'experience-secondary',
         blockedClaimText: 'Calendar Platform ownership.',
         detectedSourceEntry: 'Product Owner at SaaS Co',
         detectedSourceRole: 'PO',
         reason: 'Wrong role section.',
-        suggestedSection: 'experience-po',
+        suggestedSection: 'experience-primary',
         disposition: 'downgraded'
       }],
       evidenceWarnings: ['Unsupported insurance domain should remain a gap.']
     }),
-    section('experience-po', { bullets: [bullet('Owned backlog sequencing.')] }),
-    section('experience-qa', { bullets: [bullet('Used QA experience for UAT readiness.')] })
+    section('experience-primary', { bullets: [bullet('Owned backlog sequencing.')] }),
+    section('experience-supporting', { bullets: [bullet('Used QA experience for UAT readiness.')] })
   ]
 }
 

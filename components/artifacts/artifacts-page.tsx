@@ -29,16 +29,16 @@ import { ArtifactSectionCard } from './artifact-section-card'
 import { CalibrationPanel } from './calibration-panel'
 
 const SECTION_ORDER: SectionType[] = [
-  'summary', 'skills', 'experience-po', 'experience-ba', 'experience-qa',
+  'summary', 'skills', 'experience-primary', 'experience-secondary', 'experience-supporting',
   'cover-letter', 'referral-message', 'recruiter-message', 'linkedin-dm', 'talking-points'
 ]
 
 const SECTION_LABELS: Record<SectionType, string> = {
   summary: 'Professional Summary',
   skills: 'Skills',
-  'experience-po': 'Experience (Product Owner)',
-  'experience-ba': 'Experience (Business Analyst)',
-  'experience-qa': 'Experience (QA / Quality)',
+  'experience-primary': 'Experience (Product Owner)',
+  'experience-secondary': 'Experience (Business Analyst)',
+  'experience-supporting': 'Experience (QA / Quality)',
   'cover-letter': 'Cover Letter',
   'referral-message': 'Referral Message',
   'recruiter-message': 'Recruiter Message',

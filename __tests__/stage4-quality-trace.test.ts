@@ -39,18 +39,18 @@ const jdMap: JDRequirementMap = {
 }
 
 const blueprint: ResumeGenerationContract = {
-  targetRoleFamily: 'product_analyst',
+  targetRoleFamily: 'secondary',
   targetPosture: 'Product analyst posture.',
   sectionPlan: {
     summary: { maxLines: 3 },
     skills: { maxRows: 4 },
-    productOwner: { minBullets: 3, maxBullets: 5 },
-    productAnalyst: { minBullets: 4, maxBullets: 5 },
-    qa: { minBullets: 1, maxBullets: 2 },
+    primaryRole: { minBullets: 3, maxBullets: 5 },
+    secondaryRole: { minBullets: 4, maxBullets: 5 },
+    supportingRole: { minBullets: 1, maxBullets: 2 },
     education: { maxLines: 3 },
   },
   sessionDirection: {
-    representPrimaryPO: false,
+    representPrimaryRole: false,
     avoidFormalTitleHedging: true,
     targetPosture: 'Product analyst',
     roadmapBoundary: 'Execution and prioritization.',
@@ -121,9 +121,9 @@ function makeSections(): ArtifactSection[] {
   return [
     makeSection('summary', 'Product analyst focused on release readiness.'),
     makeSection('skills', 'Product: backlog prioritization, release readiness'),
-    makeSection('experience-po', '- Led backlog prioritization with stakeholders.'),
-    makeSection('experience-ba', '- Improved release readiness through acceptance criteria.'),
-    makeSection('experience-qa', '- Validated scope before sprint commitment.'),
+    makeSection('experience-primary', '- Led backlog prioritization with stakeholders.'),
+    makeSection('experience-secondary', '- Improved release readiness through acceptance criteria.'),
+    makeSection('experience-supporting', '- Validated scope before sprint commitment.'),
   ]
 }
 
@@ -275,9 +275,9 @@ describe('C: Blueprint → Generation trace fields', () => {
       deterministicRepairsApplied: 0,
     })
     const expected =
-      blueprint.sectionPlan.productOwner.minBullets +
-      blueprint.sectionPlan.productAnalyst.minBullets +
-      blueprint.sectionPlan.qa.minBullets
+      blueprint.sectionPlan.primaryRole.minBullets +
+      blueprint.sectionPlan.secondaryRole.minBullets +
+      blueprint.sectionPlan.supportingRole.minBullets
     expect(trace.blueprintTrace.bulletIntentCount).toBe(expected)
   })
 

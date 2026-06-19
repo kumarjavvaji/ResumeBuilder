@@ -5,13 +5,16 @@ import type {
   RawJD,
   JDSourceType,
   GapClassification,
+  CalibratedFitClassification,
   Stage1CalibrationBrief,
   JDExtractItem,
   CompactJDExtract,
+  ProfileEvidenceIndexItem,
 } from '@/contracts'
+import { matchRow } from '@/lib/stage1/evidence-match'
 
-// Hard caps on the compact extraction pass. The resume-calibration pass is bounded by these
-// counts in turn, so Stage 1 output size never scales with how many requirements a JD contains.
+// Hard caps on the compact extraction pass. The Evidence Bridge pass is bounded by these
+// counts, so Stage 1 output size never scales with JD length.
 const CAPS = {
   responsibilities: 10,
   qualifications: 10,
@@ -22,6 +25,8 @@ const CAPS = {
   bridgeQuestionSeeds: 8,
   risks: 6,
 } as const
+
+// ─── JD Extraction pass ───────────────────────────────────────────────────────
 
 const EXTRACT_ITEM_SCHEMA = (maxItems: number) => ({
   type: 'array',
@@ -63,7 +68,7 @@ const EXTRACT_TOOL = {
   },
 }
 
-const EXTRACT_SYSTEM = `You compress a job description into a compact, bounded, structured extract. This is NOT a final analysis — it is a deduplicated, prioritized shortlist that a later pass will calibrate against a candidate profile.
+const EXTRACT_SYSTEM = `You compress a job description into a compact, bounded, structured extract. This is NOT a final analysis — it is a deduplicated, prioritized shortlist that a later Evidence Bridge pass will calibrate against candidate evidence.
 
 Rules:
 - Every array has a hard cap. If the JD has more items than the cap, keep only the most resume-relevant, highest-priority ones and drop the rest. Never try to fit more in by shortening items — drop low-value items instead.
@@ -77,7 +82,8 @@ Rules:
 - bridgeQuestionSeeds: short gap/evidence prompts worth asking the candidate about later (max ${CAPS.bridgeQuestionSeeds}).
 - risks: unsupported or ambiguous claims in the JD itself, or things that look like over-detection (max ${CAPS.risks}).
 - title ≤6 words, normalizedText ≤15 words, sourceQuote ≤12 words. Never write multi-sentence prose in any field.
-- Only extract what's actually in the JD text. Never invent requirements.`
+- Only extract what's actually in the JD text. Never invent requirements.
+- COMPOUND REQUIREMENT RULE: If a qualification or domain signal combines two or more independently evaluatable dimensions (e.g. "healthcare SaaS experience", "Python and SQL proficiency", "agile delivery and stakeholder communication"), extract each dimension as a SEPARATE item. A candidate can be strong in one dimension and weak in another — they must be scored independently. "Healthcare SaaS" → two items: "SaaS product delivery" and "healthcare / regulated-data domain". Never pack two distinct skills or domains into a single row.`
 
 const EXTRACT_STRICT_SUFFIX = `Your previous attempt may have exceeded the output budget or caps. This time, be stricter: titles ≤5 words, normalizedText ≤10 words, omit sourceQuote/sourceBasis unless essential, and respect every array cap exactly — truncate to the highest-priority items rather than including everything.`
 
@@ -140,9 +146,6 @@ async function callToolWithRetry<T>(opts: {
   )
 }
 
-// Bounded by the schema, not by JD length: up to 70 items across 8 arrays, each with a
-// title/normalizedText/sourceQuote/priority/confidence. ~4500 tokens covers that worst case
-// with headroom, well under the old unbounded-growth budget this replaces.
 const EXTRACT_MAX_TOKENS = 4500
 const EXTRACT_ARRAY_KEYS = [
   'responsibilities', 'qualifications', 'niceToHaves', 'tools',
@@ -157,8 +160,6 @@ async function extractCompactJD(jdText: string): Promise<CompactJDExtract> {
     strictSuffix: EXTRACT_STRICT_SUFFIX,
     maxTokens: EXTRACT_MAX_TOKENS,
     userContent: `Job description:\n${jdText}`,
-    // All 8 arrays must be present (even if legitimately empty for a sparse JD) — catches the
-    // model silently dropping trailing arrays when it runs low on budget mid-generation.
     validate: (input) =>
       input?.summary && EXTRACT_ARRAY_KEYS.every(k => Array.isArray(input[k])) ? input : undefined,
   })
@@ -176,189 +177,534 @@ async function extractCompactJD(jdText: string): Promise<CompactJDExtract> {
   }
 }
 
-function requirementSchema() {
-  return {
+// ─── Evidence Bridge ──────────────────────────────────────────────────────────
+// Replaces the flat calibration pass. The LLM now receives structured per-requirement
+// evidence groups (with IDs, texts, strength, and source type) and returns a bridge
+// assessment per row. Classification is then derived deterministically from the assessment.
+
+type BridgeAssessment = 'direct' | 'adjacent' | 'proxy' | 'insufficient' | 'likely_retrieval_gap'
+
+interface BridgeResult {
+  rowIndex: number
+  rowLabel?: string
+  category?: JDRequirement['category']
+  jdSignal?: string
+  quickDiqGrounding?: string
+  profileGrounding?: string
+  calibratedFitInterpretation?: string
+  bridgeAssessment: BridgeAssessment
+  evidenceIdsUsed: string[]
+  sourceTypesUsed: string[]
+  confidence: 'high' | 'medium' | 'low'
+  reasoning: string
+  evidenceNeeded?: string
+  resumeImplication: string
+  stage2Action: 'suppress' | 'ask_bridge_question' | 'retrieve_more_evidence'
+  bridgeQuestion?: string
+  stage2Implication?: string
+}
+
+interface BridgeRowOutput {
+  bridges: BridgeResult[]
+  realJobFunction?: string
+}
+
+function buildBridgeTool(kind: 'required' | 'niceToHave') {
+  const isRequired = kind === 'required'
+  const bridgeItem = {
     type: 'object',
-    required: ['text', 'category', 'userCoverageStatus'],
+    required: ['rowIndex', 'rowLabel', 'category', 'bridgeAssessment', 'evidenceIdsUsed', 'sourceTypesUsed', 'confidence', 'reasoning', 'resumeImplication', 'stage2Action'],
     properties: {
-      text: { type: 'string' },
+      rowIndex: { type: 'number', description: 'Index of the requirement in the input list (0-based). Must match exactly.' },
+      rowLabel: { type: 'string', description: '≤8 words. Short label for this requirement.' },
       category: { type: 'string', enum: ['technical', 'domain', 'soft', 'tool', 'process'] },
-      userCoverageStatus: { type: 'string', enum: ['covered', 'partial', 'gap', 'unknown'] },
-      gapClassification: {
+      jdSignal: { type: 'string', description: '≤12 words. Key phrase from JD requirement.' },
+      quickDiqGrounding: { type: 'string', description: '≤25 words from DIQ context. "No material DIQ calibration." if DIQ is not provided or not relevant.' },
+      profileGrounding: { type: 'string', description: '≤20 words. What in the retrieved evidence covers or fails to cover this requirement.' },
+      calibratedFitInterpretation: { type: 'string', description: '≤30 words. Synthesis of JD signal + DIQ context + evidence bridge.' },
+      bridgeAssessment: {
         type: 'string',
-        enum: ['true_gap', 'profile_missing', 'parser_missing', 'mapping_gap', 'wording_gap', 'needs_confirmation', 'not_required'],
-        description: 'Only set when userCoverageStatus is gap or partial.',
+        enum: ['direct', 'adjacent', 'proxy', 'insufficient', 'likely_retrieval_gap'],
+        description: 'direct=evidence clearly covers it with specific IDs; adjacent=related but needs more specificity; proxy=nearby domain/role, would overreach to claim directly; insufficient=no evidence found after checking all retrieved candidates; likely_retrieval_gap=evidence should exist in this profile but was not retrieved.',
       },
-      sourceExcerpt: { type: 'string', description: '≤15 words, carried from the compact extract sourceQuote if present.' },
-      profileEvidence: { type: 'string', description: '≤20 words.' },
-      rowLabel: { type: 'string', description: '≤8 words.' },
-      jdSignal: { type: 'string', description: '≤15 words.' },
-      quickDiqGrounding: { type: 'string', description: '≤25 words. "No material DIQ calibration for this row." if none.' },
-      profileGrounding: { type: 'string', description: '≤25 words.' },
-      calibratedFitInterpretation: { type: 'string', description: '≤30 words, one synthesis sentence.' },
-      classification: { type: 'string', enum: ['covered', 'partial', 'gap', 'needs_evidence', 'weakly_supported'] },
-      evidenceNeeded: { type: 'string', description: '≤20 words.' },
-      resumeImplication: { type: 'string', description: '≤20 words.' },
-      stage2Implication: { type: 'string', description: '≤20 words, phrased as a single question prompt.' },
+      evidenceIdsUsed: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Claim/skill/tool IDs from the retrieved evidence that support this assessment. REQUIRED for direct, adjacent, proxy. Must be empty for insufficient.',
+      },
+      sourceTypesUsed: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Source types of the evidence used (e.g. manual_profile, bridge_answer).',
+      },
+      confidence: { type: 'string', enum: ['high', 'medium', 'low'], description: 'Confidence in this bridge assessment.' },
+      reasoning: { type: 'string', description: '≤25 words explaining the bridge assessment.' },
+      evidenceNeeded: { type: 'string', description: '≤20 words. Describe what specific evidence would fill this gap. Only when stage2Action is ask_bridge_question.' },
+      resumeImplication: { type: 'string', description: '≤20 words. What this means for how the resume should present or avoid this requirement.' },
+      stage2Action: {
+        type: 'string',
+        enum: ['suppress', 'ask_bridge_question', 'retrieve_more_evidence'],
+        description: 'suppress=evidence exists, no Stage 2 question needed; ask_bridge_question=targeted question for the specific missing element; retrieve_more_evidence=retrieval gap, do NOT ask the user a question.',
+      },
+      bridgeQuestion: { type: 'string', description: '≤25 words. Only when stage2Action is ask_bridge_question. Must target the SPECIFIC MISSING ELEMENT, not restate the full requirement.' },
+      stage2Implication: { type: 'string', description: '≤20 words phrased as a question prompt. Only when bridgeQuestion is set.' },
     },
+  }
+
+  return {
+    name: isRequired ? 'bridge_required' : 'bridge_nice_to_have',
+    description: `Evidence bridge assessment for ${isRequired ? 'required' : 'nice-to-have'} JD requirements against retrieved profile evidence.`,
+    input_schema: {
+      type: 'object' as const,
+      required: isRequired ? ['bridges', 'realJobFunction'] : ['bridges'],
+      properties: {
+        bridges: {
+          type: 'array',
+          maxItems: isRequired ? CAPS.qualifications : CAPS.niceToHaves,
+          items: bridgeItem,
+        },
+        ...(isRequired ? { realJobFunction: { type: 'string', description: '≤20 words. What this role actually does, based on the requirements.' } } : {}),
+      },
+    },
+  }
+}
+
+const BRIDGE_SYSTEM = `You assess whether retrieved candidate profile evidence bridges to JD requirements.
+
+For each requirement in the input, you receive:
+- The requirement text and importance
+- Retrieved evidence candidates — each has an ID, text, evidence strength (strong/medium/weak), and source type
+- Quick-DIQ company/domain context (if provided)
+
+Assess the bridge for each requirement:
+
+"direct"
+The retrieved evidence clearly and specifically covers the requirement. You can cite evidence IDs without overinterpretation. Set stage2Action to "suppress" — the resume can use this evidence.
+
+"adjacent"
+The retrieved evidence is related but incomplete. It covers the concept but lacks required specificity (domain match, volume, tool name, role level, artifact type, or wording alignment). Set stage2Action to "ask_bridge_question" targeting ONLY the missing specificity — not the full requirement.
+
+"proxy"
+The retrieved evidence is from a nearby domain or role. Claiming the requirement directly would overreach without further confirmation. Set stage2Action to "ask_bridge_question" with a question about the specific interpretive gap.
+
+"insufficient"
+No retrieved evidence supports the requirement after checking all provided candidates. The candidate may genuinely lack this. Set stage2Action to "ask_bridge_question" with a direct evidence question. Use this ONLY when all evidence has "weak" or "none" strength.
+
+"likely_retrieval_gap"
+The evidence retrieval appears to have missed relevant content. Use when: (a) the profile clearly operates in the domain or skill area but no specific evidence was retrieved for this requirement, or (b) a related requirement in the same set is covered by strong evidence but this one is not, suggesting a vocabulary mismatch rather than a true gap. Set stage2Action to "retrieve_more_evidence" — do NOT generate a bridgeQuestion.
+
+Hard rules:
+- Do NOT invent evidence IDs. Use only IDs provided in the retrieved evidence for this requirement.
+- Do NOT assign "direct" without at least one evidence ID.
+- Do NOT assign "insufficient" when any retrieved evidence has strong or moderate strength — that is a retrieval gap, not a true absence.
+- Evidence IDs are required for direct, adjacent, and proxy assessments.
+- Bridge questions must target the SPECIFIC MISSING ELEMENT, not restate the full requirement.
+- One output row per input requirement, in the same order. Count must match exactly.
+- For "likely_retrieval_gap": do not set bridgeQuestion, do not ask the user anything.`
+
+const BRIDGE_STRICT_SUFFIX = `Your previous attempt may have exceeded the output budget. This time: rowLabel ≤5 words, reasoning ≤12 words, resumeImplication ≤10 words, all other prose ≤15 words. Respect array caps exactly. One bridge result per input requirement — no more, no less.`
+
+/**
+ * Derives userCoverageStatus from classification so the two fields are never inconsistent.
+ * The bridge determines classification; userCoverageStatus is always derived from it.
+ */
+function deriveUserCoverageStatus(
+  classification: string | undefined,
+  fallback: JDRequirement['userCoverageStatus']
+): JDRequirement['userCoverageStatus'] {
+  switch (classification) {
+    case 'covered':           return 'covered'
+    case 'partially_covered': return 'partial'
+    case 'partial':           return 'partial'
+    case 'weakly_supported':  return 'partial'
+    case 'needs_evidence':    return 'gap'
+    case 'gap':               return 'gap'
+    case 'retrieval_gap':     return 'partial'
+    default:                  return fallback
+  }
+}
+
+function syncCoverageStatus(row: JDRequirement): JDRequirement {
+  if (!row.classification) return row
+  return { ...row, userCoverageStatus: deriveUserCoverageStatus(row.classification, row.userCoverageStatus) }
+}
+
+/**
+ * Deterministic classification from LLM bridge assessment.
+ * The LLM determines bridge type; the application enforces the final classification.
+ */
+function classifyFromBridgeAssessment(
+  assessment: BridgeAssessment,
+  evidenceIdsUsed: string[],
+  confidence: 'high' | 'medium' | 'low',
+  matcherStrength: 'strong' | 'moderate' | 'weak' | 'none'
+): CalibratedFitClassification {
+  if (assessment === 'likely_retrieval_gap') return 'retrieval_gap'
+
+  if (assessment === 'insufficient') {
+    // Matcher found strong/moderate evidence despite LLM saying insufficient → retrieval gap
+    if (matcherStrength === 'strong' || matcherStrength === 'moderate') return 'retrieval_gap'
+    return 'needs_evidence'
+  }
+
+  if (assessment === 'proxy') return 'weakly_supported'
+
+  if (assessment === 'adjacent') {
+    return confidence === 'high' ? 'partially_covered' : 'weakly_supported'
+  }
+
+  if (assessment === 'direct') {
+    // Direct without evidence IDs means the LLM was overconfident — treat as retrieval gap
+    if (evidenceIdsUsed.length === 0) return 'retrieval_gap'
+    return 'covered'
+  }
+
+  return 'needs_evidence'
+}
+
+/**
+ * Derives GapClassification from the final classification and bridge assessment.
+ */
+function deriveGapClassification(
+  classification: CalibratedFitClassification,
+  assessment: BridgeAssessment
+): GapClassification | undefined {
+  switch (classification) {
+    case 'covered':           return undefined
+    case 'partially_covered': return 'needs_confirmation'
+    case 'partial':           return 'needs_confirmation'
+    case 'weakly_supported':  return assessment === 'proxy' ? 'mapping_gap' : 'wording_gap'
+    case 'needs_evidence':    return 'profile_missing'
+    case 'retrieval_gap':     return 'retrieval_gap'
+    case 'gap':               return 'true_gap'
+    default:                  return undefined
   }
 }
 
 /**
- * One calibration call per row-kind (required vs. niceToHave) instead of a single combined call.
- * A combined call's output scales with required+niceToHave together (up to 18 rows x 15 fields each),
- * which can overflow even a generous token budget. Splitting keeps each call's output bounded by its
- * own cap alone, so calibration never truncates regardless of how many requirements the JD has.
+ * Deterministic consistency audit. Enforces the hard classification rules before the
+ * artifact is surfaced. Called after the bridge LLM pass.
+ *
+ * Rules enforced:
+ * - Every row must have an allowed classification.
+ * - covered / partially_covered / weakly_supported must have evidence IDs.
+ * - retrieval_gap must not have a Stage 2 question.
+ * - needs_evidence must not be assigned when the matcher found strong/moderate evidence.
  */
-function calibrateRowTool(kind: 'required' | 'niceToHave') {
-  const isRequired = kind === 'required'
-  return {
-    name: isRequired ? 'calibrate_required' : 'calibrate_nice_to_have',
-    description: `Calibrate a bounded set of ${kind} JD requirements against Quick-DIQ and the candidate profile.`,
-    input_schema: {
-      type: 'object' as const,
-      required: isRequired ? ['rows', 'realJobFunction'] : ['rows'],
-      properties: {
-        rows: { type: 'array', maxItems: isRequired ? CAPS.qualifications : CAPS.niceToHaves, items: requirementSchema() },
-        ...(isRequired ? { realJobFunction: { type: 'string', description: '≤20 words.' } } : {}),
-      },
-    },
-  }
+function runConsistencyAudit(rows: JDRequirement[]): { rows: JDRequirement[]; violations: string[] } {
+  const ALLOWED = new Set<string>(['covered', 'partially_covered', 'weakly_supported', 'needs_evidence', 'retrieval_gap'])
+  const violations: string[] = []
+
+  const fixed = rows.map(row => {
+    let r = { ...row }
+    const label = r.rowLabel || r.text.slice(0, 40)
+
+    // Enforce allowed taxonomy
+    if (!r.classification || !ALLOWED.has(r.classification)) {
+      violations.push(`"${label}": classification "${r.classification}" not in allowed set → needs_evidence`)
+      r = { ...r, classification: 'needs_evidence' as const, gapClassification: 'profile_missing' as GapClassification }
+    }
+
+    // covered/partially_covered/weakly_supported require evidence IDs
+    if (['covered', 'partially_covered', 'weakly_supported'].includes(r.classification as string)) {
+      if (!r.matchedClaimIds?.length) {
+        violations.push(`"${label}": "${r.classification}" without evidence IDs → retrieval_gap`)
+        r = {
+          ...r,
+          classification: 'retrieval_gap' as const,
+          gapClassification: 'retrieval_gap' as GapClassification,
+          userCoverageStatus: 'partial' as const,
+          stage2Action: 'retrieve_more_evidence' as const,
+          stage2Implication: undefined,
+        }
+      }
+    }
+
+    // retrieval_gap must not generate Stage 2 questions
+    if (r.classification === 'retrieval_gap') {
+      if (r.stage2Action === 'ask_bridge_question' || r.stage2Implication) {
+        violations.push(`"${label}": retrieval_gap must not have Stage 2 question → suppressed`)
+        r = { ...r, stage2Action: 'retrieve_more_evidence' as const, stage2Implication: undefined }
+      }
+    }
+
+    // needs_evidence must not be set when matcher found strong/moderate evidence
+    if (
+      r.classification === 'needs_evidence' &&
+      (r.profileEvidenceStrength === 'strong' || r.profileEvidenceStrength === 'moderate')
+    ) {
+      violations.push(`"${label}": needs_evidence contradicts ${r.profileEvidenceStrength} matcher evidence → retrieval_gap`)
+      r = {
+        ...r,
+        classification: 'retrieval_gap' as const,
+        gapClassification: 'retrieval_gap' as GapClassification,
+        userCoverageStatus: 'partial' as const,
+        stage2Action: 'retrieve_more_evidence' as const,
+        stage2Implication: undefined,
+      }
+    }
+
+    return r
+  })
+
+  return { rows: fixed, violations }
 }
 
-const CALIBRATE_STRICT_SUFFIX = `Your previous attempt may have exceeded the output budget. This time, be stricter: every prose field ≤12 words, one short clause only, no exceptions. Respect array caps exactly.`
-
-interface CalibrateRowOutput {
-  rows: JDRequirement[]
-  realJobFunction?: string
-}
-
-function calibrationFraming(calibrationBrief?: Stage1CalibrationBrief): string {
-  return calibrationBrief
-    ? `
-
-You are generating a calibrated Stage 1 target artifact, not a JD/profile matching report. For every row, ground your analysis in three inputs: 1. the JD extract, 2. the normalized Quick-DIQ company/domain analysis, 3. the saved candidate profile.
-
-Use Quick-DIQ to interpret the JD's company/domain meaning, priority, delivery context, stakeholder context, tool context, and evidence expectations. Do not use Quick-DIQ as candidate evidence. Quick-DIQ can calibrate what matters, but candidate claims require saved profile evidence or user confirmation — never mark a requirement "covered" on the basis of Quick-DIQ alone.
-
-Each row must include jdSignal, quickDiqGrounding, profileGrounding, calibratedFitInterpretation, classification, evidenceNeeded, resumeImplication, and stage2Implication, each within its word cap. If Quick-DIQ does not affect a row, set quickDiqGrounding to "No material DIQ calibration for this row."
-
-Quick-DIQ company/domain analysis:
-${JSON.stringify(calibrationBrief, null, 2)}`
-    : ''
-}
-
-async function calibrateRowSet(
+/**
+ * Runs the Evidence Bridge for one row-set (required or nice-to-have).
+ *
+ * Each requirement gets its matched evidence candidates injected as structured objects
+ * with IDs, texts, strength, and source type. The LLM returns a bridge assessment per
+ * requirement instead of a flat coverage score, enabling deterministic classification.
+ */
+async function bridgeRowSet(
   kind: 'required' | 'niceToHave',
   items: JDExtractItem[],
-  extract: CompactJDExtract,
+  evidenceIndex: ProfileEvidenceIndexItem[],
   userSkillsSummary: string,
-  calibrationBrief?: Stage1CalibrationBrief
-): Promise<CalibrateRowOutput> {
+  calibrationBrief?: Stage1CalibrationBrief,
+): Promise<BridgeRowOutput> {
   const isRequired = kind === 'required'
-  const system = `You calibrate a bounded, pre-extracted set of ${isRequired ? 'required' : 'nice-to-have'} JD requirements against a candidate profile. The requirement set is already deduplicated and capped — produce exactly one row per item below, do not invent additional rows.
 
-Rules:
-- One row per item in the list below, in the same order. Do not add or drop rows.
-- userCoverageStatus: compare each requirement to the user skills summary.
-  - "covered" = user clearly has this
-  - "partial" = user has related experience but not a direct match
-  - "gap" = user does not have this
-  - "unknown" = not enough information
-- classification: "needs_evidence" if the requirement isn't found in the user profile (a bridge-question target, not a hard disqualifier); "weakly_supported" if coverage is partial or thin; otherwise "covered" or "gap" to match userCoverageStatus.
-${isRequired ? '- realJobFunction: the actual job function in plain terms, ≤20 words.\n' : ''}- sourceExcerpt: carry over the item's sourceQuote/sourceBasis if present, else omit.
-- gapClassification: for rows with gap/partial coverage, classify true_gap / profile_missing / parser_missing / mapping_gap / wording_gap / needs_confirmation. Omit for covered/unknown.
-- Every prose field has a word cap stated in its schema description — respect it. Keep to one concise clause, not multi-sentence prose.
-- Never invent a requirement that isn't in the list below.${calibrationFraming(calibrationBrief)}`
+  // Build per-requirement evidence groups from deterministic pre-match
+  const evidenceGroups = items.map((item, i) => {
+    const tempRow: JDRequirement = {
+      text: item.normalizedText || item.title,
+      category: 'technical',
+      userCoverageStatus: 'unknown',
+    }
+    const matched = matchRow(tempRow, evidenceIndex)
+    const matchedItems = (matched.matchedClaimIds ?? [])
+      .map(id => evidenceIndex.find(e => e.claimId === id))
+      .filter((e): e is ProfileEvidenceIndexItem => e != null)
 
-  const userContent = `${isRequired ? 'Required' : 'Nice-to-have'} items to calibrate:\n${JSON.stringify(items, null, 2)}\n\nJD context (for grounding only — do not add rows from this):\n${JSON.stringify(
-    {
-      summary: extract.summary,
-      tools: extract.tools,
-      domainSignals: extract.domainSignals,
-      responsibilities: extract.responsibilities,
-    },
-    null,
-    2
-  )}\n\nUser skills summary:\n${userSkillsSummary}`
+    return {
+      rowIndex: i,
+      label: item.title,
+      text: item.normalizedText || item.title,
+      importance: item.priority,
+      sourceQuote: item.sourceQuote || item.sourceBasis,
+      retrievedEvidence: matchedItems.map(e => ({
+        id: e.claimId,
+        text: e.text,
+        category: e.category,
+        strength: e.evidenceStrength,
+        sourceType: (e as any).sourceType ?? 'manual_profile',
+      })),
+    }
+  })
 
-  const tool = calibrateRowTool(kind)
-  return callToolWithRetry<CalibrateRowOutput>({
+  const diqContext = calibrationBrief
+    ? JSON.stringify({
+        companyContext: calibrationBrief.companyContext,
+        domainContext: calibrationBrief.domainContext,
+        likelyHiringPriorities: calibrationBrief.likelyHiringPriorities,
+        deliverySignals: calibrationBrief.deliverySignals,
+        stakeholderSignals: calibrationBrief.stakeholderSignals,
+      }, null, 2)
+    : null
+
+  const userContent = [
+    `${isRequired ? 'Required' : 'Nice-to-have'} requirements to bridge (one bridge result per requirement, same order):`,
+    JSON.stringify(evidenceGroups, null, 2),
+    userSkillsSummary
+      ? `\nCandidate skills context (for orientation only — cite evidence IDs from the retrieved evidence above, not from this list):\n${userSkillsSummary.slice(0, 500)}`
+      : null,
+    diqContext ? `\nQuick-DIQ company/domain context:\n${diqContext}` : null,
+  ].filter(Boolean).join('\n')
+
+  const tool = buildBridgeTool(kind)
+
+  return callToolWithRetry<BridgeRowOutput>({
     toolName: tool.name,
     tools: [tool],
-    system,
-    strictSuffix: CALIBRATE_STRICT_SUFFIX,
-    maxTokens: 3500,
+    system: BRIDGE_SYSTEM,
+    strictSuffix: BRIDGE_STRICT_SUFFIX,
+    maxTokens: 4500,
     userContent,
-    validate: (input) => (input?.rows ? input : undefined),
+    validate: (input) => (input?.bridges && Array.isArray(input.bridges) ? input : undefined),
   })
 }
 
-interface CalibrateOutput {
+// ─── Internal pipeline output type ───────────────────────────────────────────
+
+interface BridgeOutput {
   required: JDRequirement[]
   niceToHave: JDRequirement[]
   realJobFunction: string
   needsEvidenceItems: string[]
   weaklySupportedRequirements: string[]
+  violations: string[]
 }
 
-async function calibrateRequirements(
+/**
+ * Applies bridge results to extracted items, derives classification deterministically,
+ * and runs the consistency audit. Returns fully-classified JD rows.
+ */
+async function bridgeRequirements(
   extract: CompactJDExtract,
   userSkillsSummary: string,
-  calibrationBrief?: Stage1CalibrationBrief
-): Promise<CalibrateOutput> {
+  evidenceIndex: ProfileEvidenceIndexItem[],
+  calibrationBrief?: Stage1CalibrationBrief,
+): Promise<BridgeOutput> {
+  // Pre-match all items first to get matcher strength (used in classifyFromBridgeAssessment
+  // and as a safety net when the bridge LLM under-reports evidence IDs).
+  const preMatchRequired = extract.qualifications.map(item => {
+    const row: JDRequirement = { text: item.normalizedText || item.title, category: 'technical', userCoverageStatus: 'unknown' }
+    return matchRow(row, evidenceIndex)
+  })
+  const preMatchNiceToHave = extract.niceToHaves.map(item => {
+    const row: JDRequirement = { text: item.normalizedText || item.title, category: 'technical', userCoverageStatus: 'unknown' }
+    return matchRow(row, evidenceIndex)
+  })
+
+  // Run bridge LLM calls in parallel (one per row-set)
   const [requiredOut, niceToHaveOut] = await Promise.all([
-    calibrateRowSet('required', extract.qualifications, extract, userSkillsSummary, calibrationBrief),
-    calibrateRowSet('niceToHave', extract.niceToHaves, extract, userSkillsSummary, calibrationBrief),
+    bridgeRowSet('required', extract.qualifications, evidenceIndex, userSkillsSummary, calibrationBrief),
+    bridgeRowSet('niceToHave', extract.niceToHaves, evidenceIndex, userSkillsSummary, calibrationBrief),
   ])
 
-  const allRows = [...requiredOut.rows, ...niceToHaveOut.rows]
+  function applyBridgeResults(
+    items: JDExtractItem[],
+    bridges: BridgeResult[],
+    preMatches: JDRequirement[],
+  ): JDRequirement[] {
+    return items.map((item, i) => {
+      const bridge = bridges.find(b => b.rowIndex === i) ?? bridges[i]
+      const preMatch = preMatches[i]
+      const matcherStrength = (preMatch?.profileEvidenceStrength ?? 'none') as 'strong' | 'moderate' | 'weak' | 'none'
+
+      if (!bridge) {
+        // Fallback: bridge result missing for this index
+        return {
+          text: item.normalizedText || item.title,
+          category: 'technical' as const,
+          userCoverageStatus: 'partial' as const,
+          rowLabel: item.title,
+          sourceExcerpt: item.sourceQuote,
+          classification: 'retrieval_gap' as const,
+          gapClassification: 'retrieval_gap' as GapClassification,
+          bridgeAssessment: 'likely_retrieval_gap' as BridgeAssessment,
+          bridgeConfidence: 'low' as const,
+          matchedClaimIds: preMatch?.matchedClaimIds ?? [],
+          matchedEvidenceTexts: preMatch?.matchedEvidenceTexts ?? [],
+          profileEvidenceStrength: matcherStrength,
+          stage2Action: 'retrieve_more_evidence' as const,
+          quickDiqGrounding: 'No material DIQ calibration.',
+          resumeImplication: 'Cannot make a resume claim without evidence.',
+        }
+      }
+
+      const classification = classifyFromBridgeAssessment(
+        bridge.bridgeAssessment,
+        bridge.evidenceIdsUsed,
+        bridge.confidence,
+        matcherStrength,
+      )
+
+      const gapClassification = deriveGapClassification(classification, bridge.bridgeAssessment)
+
+      // Use bridge-provided evidence IDs. If LLM said direct/adjacent/proxy but forgot IDs,
+      // fall back to matcher IDs so the consistency audit can validate rather than demote.
+      const claimIds = bridge.evidenceIdsUsed.length > 0
+        ? bridge.evidenceIdsUsed
+        : (preMatch?.matchedClaimIds ?? [])
+
+      return {
+        text: item.normalizedText || item.title,
+        category: (bridge.category ?? 'technical') as JDRequirement['category'],
+        userCoverageStatus: 'unknown' as const, // synced below
+        sourceExcerpt: item.sourceQuote,
+        rowLabel: bridge.rowLabel || item.title,
+        jdSignal: bridge.jdSignal || item.sourceQuote || '',
+        quickDiqGrounding: bridge.quickDiqGrounding || 'No material DIQ calibration.',
+        profileGrounding: bridge.profileGrounding || '',
+        calibratedFitInterpretation: bridge.calibratedFitInterpretation || '',
+        classification,
+        gapClassification,
+        bridgeAssessment: bridge.bridgeAssessment,
+        bridgeConfidence: bridge.confidence,
+        bridgeReasoning: bridge.reasoning,
+        evidenceNeeded: bridge.evidenceNeeded,
+        resumeImplication: bridge.resumeImplication,
+        stage2Action: bridge.stage2Action,
+        stage2Implication: bridge.stage2Implication || bridge.bridgeQuestion,
+        matchedClaimIds: claimIds,
+        matchedEvidenceTexts: preMatch?.matchedEvidenceTexts ?? [],
+        profileEvidenceStrength: matcherStrength,
+      }
+    })
+  }
+
+  const required = applyBridgeResults(extract.qualifications, requiredOut.bridges, preMatchRequired)
+  const niceToHave = applyBridgeResults(extract.niceToHaves, niceToHaveOut.bridges, preMatchNiceToHave)
+
+  // Deterministic consistency audit
+  const { rows: auditedRequired, violations: reqViolations } = runConsistencyAudit(required)
+  const { rows: auditedNiceToHave, violations: nthViolations } = runConsistencyAudit(niceToHave)
+  const violations = [...reqViolations, ...nthViolations]
+
+  // Sync userCoverageStatus from classification — single source of truth
+  const syncedRequired = auditedRequired.map(syncCoverageStatus)
+  const syncedNiceToHave = auditedNiceToHave.map(syncCoverageStatus)
+
+  const allRows = [...syncedRequired, ...syncedNiceToHave]
+
+  // Stage 2 targeting: only ask_bridge_question rows (not retrieve_more_evidence, not suppress)
   const needsEvidenceItems = allRows
-    .filter(r => r.classification === 'needs_evidence')
-    .map(r => r.evidenceNeeded || r.text)
+    .filter(r => r.stage2Action === 'ask_bridge_question')
+    .map(r => r.evidenceNeeded || r.stage2Implication || r.text)
+
+  // Weakly supported = partially_covered + weakly_supported (for UI display)
   const weaklySupportedRequirements = allRows
-    .filter(r => r.classification === 'weakly_supported' || r.userCoverageStatus === 'partial')
-    .map(r => r.text)
+    .filter(r => r.classification === 'weakly_supported' || r.classification === 'partially_covered')
+    .map(r => r.rowLabel || r.text)
 
   return {
-    required: requiredOut.rows,
-    niceToHave: niceToHaveOut.rows,
+    required: syncedRequired,
+    niceToHave: syncedNiceToHave,
     realJobFunction: requiredOut.realJobFunction ?? '',
     needsEvidenceItems,
     weaklySupportedRequirements,
+    violations,
   }
 }
+
+// ─── Public entry point ───────────────────────────────────────────────────────
 
 export interface ParsedJD {
   rawJD: RawJD
   requirementMap: JDRequirementMap
+  contradictions: string[]
 }
 
 export async function parseJobDescription(
   jdText: string,
   userSkillsSummary: string,
   jdSourceType: JDSourceType = 'pasted_jd',
-  calibrationBrief?: Stage1CalibrationBrief
+  calibrationBrief?: Stage1CalibrationBrief,
+  evidenceIndex?: ProfileEvidenceIndexItem[]
 ): Promise<ParsedJD> {
   const compactExtract = await extractCompactJD(jdText)
-  const calibrated = await calibrateRequirements(compactExtract, userSkillsSummary, calibrationBrief)
+  const index = evidenceIndex ?? []
+  const bridged = await bridgeRequirements(compactExtract, userSkillsSummary, index, calibrationBrief)
 
   function stampSource(reqs: JDRequirement[], forceGap?: GapClassification): JDRequirement[] {
     return reqs.map(r => ({
       ...r,
       sourceType: jdSourceType,
-      ...(forceGap !== undefined ? { gapClassification: forceGap } : {}),
+      ...(forceGap !== undefined && !r.gapClassification ? { gapClassification: forceGap } : {}),
     }))
   }
 
   const requirementMap: JDRequirementMap = {
-    required: stampSource(calibrated.required),
-    niceToHave: stampSource(calibrated.niceToHave, 'not_required'),
-    realJobFunction: calibrated.realJobFunction,
-    needsEvidenceItems: calibrated.needsEvidenceItems ?? [],
-    // Back-fill the deprecated field so existing consumers don't break
-    unsupportedRequirements: calibrated.needsEvidenceItems ?? [],
-    weaklySupportedRequirements: calibrated.weaklySupportedRequirements ?? [],
+    required: stampSource(bridged.required),
+    niceToHave: stampSource(bridged.niceToHave, 'not_required'),
+    realJobFunction: bridged.realJobFunction,
+    needsEvidenceItems: bridged.needsEvidenceItems ?? [],
+    // Back-fill deprecated field so existing consumers don't break
+    unsupportedRequirements: bridged.needsEvidenceItems ?? [],
+    weaklySupportedRequirements: bridged.weaklySupportedRequirements ?? [],
   }
 
   const rawJD: RawJD = {
@@ -371,5 +717,5 @@ export async function parseJobDescription(
     compactExtract,
   }
 
-  return { rawJD, requirementMap }
+  return { rawJD, requirementMap, contradictions: bridged.violations }
 }

@@ -43,15 +43,15 @@ export function buildResumeGenerationContract(input: ContractBuildInput): Resume
   const sectionPlan = defaultSectionPlan(targetRoleFamily)
 
   const azureDevOpsAllowed = detectAzureDevOpsAllowed(profile)
-  const representPrimaryPO = detectPrimaryPORole(overallRefinementPrompt, profile)
+  const representPrimaryRole = detectPrimaryPORole(overallRefinementPrompt, profile)
   const avoidFormalTitleHedging =
-    representPrimaryPO ||
+    representPrimaryRole ||
     /hedg|PO-adjacent|acting PO|informal PO/i.test(overallRefinementPrompt)
 
   const salesforcePreferredPhrase = detectSalesforcePhrase(overallRefinementPrompt)
 
   const sessionDirection: Stage4SessionDirection = {
-    representPrimaryPO,
+    representPrimaryRole,
     avoidFormalTitleHedging,
     targetPosture: deriveTargetPosture(targetRoleFamily, roleTitleLower),
     roadmapBoundary:
@@ -88,11 +88,11 @@ export function buildResumeGenerationContract(input: ContractBuildInput): Resume
 
   const evidenceRouting: Record<string, string[]> = {
     CSPO: ['summary', 'education'],
-    Jira: ['skills', 'experience-po', 'experience-ba'],
-    Pendo: ['skills', 'experience-po', 'experience-ba'],
+    Jira: ['skills', 'experience-primary', 'experience-secondary'],
+    Pendo: ['skills', 'experience-primary', 'experience-secondary'],
     'travel willingness': [],
     'Azure DevOps': azureDevOpsAllowed ? ['skills'] : [],
-    'roadmap ownership': ['experience-po'],
+    'roadmap ownership': ['experience-primary'],
     // Dynamic: older/non-primary employer entries routed to summary when JD needs their domain
     ...buildDynamicEmployerRouting(profile, jdText),
   }
@@ -112,34 +112,47 @@ export function buildResumeGenerationContract(input: ContractBuildInput): Resume
 // ─── Role family detection ────────────────────────────────────────────────────
 
 function detectRoleFamily(emphasis: EmphasisCategory, roleTitleLower: string): Stage4RoleFamily {
-  if (emphasis === 'QA') return 'qa'
-  if (emphasis === 'data') return 'product_analyst'
-  if (emphasis === 'BA') return 'business_analyst'
-  if (emphasis === 'PO') {
-    return roleTitleLower.includes('associate') ? 'associate_pm' : 'product_owner'
-  }
+  // Title-based detection is the primary signal
   if (
-    roleTitleLower.includes('associate') &&
-    (roleTitleLower.includes('product') || roleTitleLower.includes(' pm') || roleTitleLower.includes('manager'))
-  ) {
-    return 'associate_pm'
-  }
-  if (roleTitleLower.includes('product owner')) return 'product_owner'
-  if (roleTitleLower.includes('business analyst') || roleTitleLower.includes(' ba ')) return 'business_analyst'
-  if (roleTitleLower.includes('product analyst')) return 'product_analyst'
+    roleTitleLower.includes('product owner') ||
+    roleTitleLower.includes('product manager') ||
+    roleTitleLower.includes('program manager') ||
+    roleTitleLower.includes('scrum master')
+  ) return 'primary'
+
+  if (
+    roleTitleLower.includes('analyst') ||
+    roleTitleLower.includes('business analyst') ||
+    roleTitleLower.includes('product analyst') ||
+    roleTitleLower.includes('systems analyst') ||
+    roleTitleLower.includes('data analyst')
+  ) return 'secondary'
+
+  if (
+    roleTitleLower.includes('supporting') ||
+    roleTitleLower.includes('quality') ||
+    roleTitleLower.includes('test engineer') ||
+    roleTitleLower.includes('tester')
+  ) return 'supporting'
+
+  // Emphasis string as a secondary signal (caller can pass the role title or a category label)
+  const emphasisLower = emphasis.toLowerCase()
+  if (emphasisLower.includes('analyst') || emphasisLower.includes('data')) return 'secondary'
+  if (emphasisLower.includes('supporting') || emphasisLower.includes('quality')) return 'supporting'
+
   return 'other'
 }
 
 function defaultSectionPlan(roleFamily: Stage4RoleFamily): Stage4SectionPlan {
-  const isQA = roleFamily === 'qa'
+  const isSupporting = roleFamily === 'supporting'
   return {
     summary: { maxLines: 4 },
     skills: { maxRows: 5 },
-    productOwner: { minBullets: 5, maxBullets: 6 },
-    productAnalyst: { minBullets: 4, maxBullets: 5 },
-    qa: {
-      minBullets: isQA ? 5 : 3,
-      maxBullets: isQA ? 6 : 4,
+    primaryRole: { minBullets: 5, maxBullets: 6 },
+    secondaryRole: { minBullets: 4, maxBullets: 5 },
+    supportingRole: {
+      minBullets: isSupporting ? 5 : 3,
+      maxBullets: isSupporting ? 6 : 4,
     },
     education: { maxLines: 3 },
   }
@@ -147,16 +160,18 @@ function defaultSectionPlan(roleFamily: Stage4RoleFamily): Stage4SectionPlan {
 
 function deriveTargetPosture(roleFamily: Stage4RoleFamily, roleTitleLower: string): string {
   switch (roleFamily) {
-    case 'associate_pm':
-      return 'tactical product delivery / business-to-IT execution / associate product management'
-    case 'product_owner':
-      return 'tactical product delivery / backlog execution / sprint delivery / stakeholder alignment'
-    case 'product_analyst':
-      return 'product analytics / data-backed decisions / KPI measurement / stakeholder recommendations'
-    case 'business_analyst':
-      return 'requirements elicitation / gap analysis / acceptance criteria / UAT / release readiness'
-    case 'qa':
-      return 'test automation / quality frameworks / release readiness / defect prevention'
+    case 'primary':
+      return roleTitleLower
+        ? `${roleTitleLower} / backlog execution / sprint delivery / stakeholder alignment`
+        : 'tactical product delivery / backlog execution / sprint delivery / stakeholder alignment'
+    case 'secondary':
+      return roleTitleLower
+        ? `${roleTitleLower} / requirements elicitation / gap analysis / acceptance criteria`
+        : 'requirements elicitation / gap analysis / acceptance criteria / UAT / release readiness'
+    case 'supporting':
+      return roleTitleLower
+        ? `${roleTitleLower} / release readiness / defect prevention`
+        : 'release readiness / defect prevention / quality frameworks'
     default:
       return roleTitleLower
         ? `product delivery targeting: ${roleTitleLower}`
@@ -167,9 +182,11 @@ function deriveTargetPosture(roleFamily: Stage4RoleFamily, roleTitleLower: strin
 // ─── Session direction helpers ────────────────────────────────────────────────
 
 function detectPrimaryPORole(overallPrompt: string, profile: UserProfile): boolean {
+  if (/treat.*primary role|represent.*primary/i.test(overallPrompt)) return true
   if (/treat.*product owner|represent.*product owner/i.test(overallPrompt)) return true
   if (/treat.*PO|represent.*PO/i.test(overallPrompt)) return true
-  return profile.workHistory.some(w => /product owner/i.test(w.title))
+  // Any work history with a clear primary role title is treated as primary
+  return profile.workHistory.length > 0
 }
 
 /**
@@ -479,73 +496,65 @@ export function validateResumeAgainstContract(
     })
   }
 
-  // Experience block bullet counts
+  // Experience block bullet counts — use contract.sectionPlan to validate
   const blocks = parseExperienceBlocks(experienceText)
-  const poBullets = blocks.filter(b => /product owner/i.test(b.title)).reduce((s, b) => s + b.bullets.length, 0)
-  const paBullets = blocks
-    .filter(b => /product analyst|business analyst/i.test(b.title))
-    .reduce((s, b) => s + b.bullets.length, 0)
-  const qaBullets = blocks
-    .filter(b => /test engineer|qa engineer|quality|software test/i.test(b.title))
-    .reduce((s, b) => s + b.bullets.length, 0)
+  const primaryBlocks = blocks.slice(0, 1)  // first block = primary role
+  const secondaryBlocks = blocks.slice(1, 2) // second block = secondary role
+  const supportingBlocks = blocks.slice(2)   // remaining = supporting
 
-  const poBlocks = blocks.filter(b => /product owner/i.test(b.title))
-  if (poBlocks.length > 0) {
-    if (poBullets < contract.sectionPlan.productOwner.minBullets) {
+  const primaryBullets = primaryBlocks.reduce((s, b) => s + b.bullets.length, 0)
+  const secondaryBullets = secondaryBlocks.reduce((s, b) => s + b.bullets.length, 0)
+  const supportingBullets = supportingBlocks.reduce((s, b) => s + b.bullets.length, 0)
+
+  if (primaryBlocks.length > 0) {
+    if (primaryBullets < contract.sectionPlan.primaryRole.minBullets) {
       violations.push({
-        rule: 'po_min_bullets',
-        section: 'experience-po',
-        detail: `Product Owner has ${poBullets} bullets; min is ${contract.sectionPlan.productOwner.minBullets}`,
+        rule: 'primary_min_bullets',
+        section: 'experience-primary',
+        detail: `Primary role has ${primaryBullets} bullets; min is ${contract.sectionPlan.primaryRole.minBullets}`,
         canAutoRepair: false,
         severity: 'error',
       })
     }
-    if (poBullets > contract.sectionPlan.productOwner.maxBullets) {
+    if (primaryBullets > contract.sectionPlan.primaryRole.maxBullets) {
       violations.push({
-        rule: 'po_max_bullets',
-        section: 'experience-po',
-        detail: `Product Owner has ${poBullets} bullets; max is ${contract.sectionPlan.productOwner.maxBullets}`,
+        rule: 'primary_max_bullets',
+        section: 'experience-primary',
+        detail: `Primary role has ${primaryBullets} bullets; max is ${contract.sectionPlan.primaryRole.maxBullets}`,
         canAutoRepair: false,
         severity: 'error',
       })
     }
   }
 
-  const paBlocks = blocks.filter(b => /product analyst|business analyst/i.test(b.title))
-  if (paBlocks.length > 0) {
-    if (paBullets < contract.sectionPlan.productAnalyst.minBullets) {
+  if (secondaryBlocks.length > 0) {
+    if (secondaryBullets < contract.sectionPlan.secondaryRole.minBullets) {
       violations.push({
-        rule: 'pa_min_bullets',
-        section: 'experience-ba',
-        detail: `Product Analyst has ${paBullets} bullets; min is ${contract.sectionPlan.productAnalyst.minBullets}`,
+        rule: 'secondary_min_bullets',
+        section: 'experience-secondary',
+        detail: `Secondary role has ${secondaryBullets} bullets; min is ${contract.sectionPlan.secondaryRole.minBullets}`,
         canAutoRepair: false,
         severity: 'error',
       })
     }
-    if (paBullets > contract.sectionPlan.productAnalyst.maxBullets) {
+    if (secondaryBullets > contract.sectionPlan.secondaryRole.maxBullets) {
       violations.push({
-        rule: 'pa_max_bullets',
-        section: 'experience-ba',
-        detail: `Product Analyst has ${paBullets} bullets; max is ${contract.sectionPlan.productAnalyst.maxBullets}`,
+        rule: 'secondary_max_bullets',
+        section: 'experience-secondary',
+        detail: `Secondary role has ${secondaryBullets} bullets; max is ${contract.sectionPlan.secondaryRole.maxBullets}`,
         canAutoRepair: false,
         severity: 'error',
       })
     }
   }
 
-  // QA should not dominate for product / BA roles
-  const isProductRole = [
-    'product_owner',
-    'associate_pm',
-    'product_analyst',
-    'business_analyst',
-  ].includes(contract.targetRoleFamily)
-  const qaBlocks = blocks.filter(b => /test engineer|qa engineer|quality|software test/i.test(b.title))
-  if (isProductRole && qaBlocks.length > 0 && paBlocks.length > 0 && qaBullets > paBullets) {
+  // Supporting role should not dominate for primary/secondary-focused resumes
+  const isNonSupportingTarget = contract.targetRoleFamily !== 'supporting'
+  if (isNonSupportingTarget && supportingBlocks.length > 0 && secondaryBlocks.length > 0 && supportingBullets > secondaryBullets) {
     violations.push({
-      rule: 'qa_exceeds_pa',
-      section: 'experience-qa',
-      detail: `QA has ${qaBullets} bullets but PA only has ${paBullets} — QA should not exceed PA for product/BA roles`,
+      rule: 'supporting_exceeds_secondary',
+      section: 'experience-supporting',
+      detail: `Supporting role has ${supportingBullets} bullets but secondary role only has ${secondaryBullets} — supporting should not exceed secondary`,
       canAutoRepair: false,
       severity: 'error',
     })
@@ -605,7 +614,7 @@ export function validateResumeAgainstContract(
   ) {
     violations.push({
       rule: 'roadmap_overclaim',
-      section: 'experience-po',
+      section: 'experience-primary',
       detail: 'Roadmap language may exceed leadership-sponsored execution boundary',
       canAutoRepair: false,
       severity: 'warning',
@@ -794,12 +803,12 @@ export function serializeContractForPrompt(contract: ResumeGenerationContract): 
     'SECTION LIMITS:',
     `  Summary: max ${sp.summary.maxLines} lines`,
     `  Skills: max ${sp.skills.maxRows} rows`,
-    `  Product Owner: ${sp.productOwner.minBullets}–${sp.productOwner.maxBullets} bullets`,
-    `  Product Analyst/BA: ${sp.productAnalyst.minBullets}–${sp.productAnalyst.maxBullets} bullets`,
-    `  QA: ${sp.qa.minBullets}–${sp.qa.maxBullets} bullets${contract.targetRoleFamily !== 'qa' ? ' (supporting only)' : ''}`,
+    `  Primary role: ${sp.primaryRole.minBullets}–${sp.primaryRole.maxBullets} bullets`,
+    `  Secondary role: ${sp.secondaryRole.minBullets}–${sp.secondaryRole.maxBullets} bullets`,
+    `  Supporting role: ${sp.supportingRole.minBullets}–${sp.supportingRole.maxBullets} bullets${contract.targetRoleFamily !== 'supporting' ? ' (supporting only)' : ''}`,
     '',
     'SESSION DIRECTION:',
-    `  Primary PO role: ${sd.representPrimaryPO ? 'YES — treat Product Owner work history as primary PO role; no title hedging' : 'not set'}`,
+    `  Primary role: ${sd.representPrimaryRole ? 'YES — treat first work history entry as primary role; no title hedging' : 'not set'}`,
     `  Avoid title hedging: ${sd.avoidFormalTitleHedging ? 'YES — no defensive PO title language' : 'no'}`,
     `  Roadmap boundary: ${sd.roadmapBoundary}`,
     `  Azure DevOps: ${sd.azureDevOpsAllowed ? 'allowed' : 'NOT allowed — use Jira'}`,

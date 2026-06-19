@@ -21,9 +21,9 @@ import { buildStage4QualityTrace } from './quality-trace'
 export const REQUIRED_RESUME_SECTION_TYPES: SectionType[] = [
   'summary',
   'skills',
-  'experience-po',
-  'experience-ba',
-  'experience-qa'
+  'experience-primary',
+  'experience-secondary',
+  'experience-supporting'
 ]
 
 const OPTIONAL_ARTIFACT_TYPES = new Set<SectionType>([
@@ -37,9 +37,9 @@ const OPTIONAL_ARTIFACT_TYPES = new Set<SectionType>([
 const SECTION_LABELS: Record<SectionType, string> = {
   summary: 'Professional Summary',
   skills: 'Skills',
-  'experience-po': 'Experience: Product Owner',
-  'experience-ba': 'Experience: Business Analyst',
-  'experience-qa': 'Experience: QA / Quality',
+  'experience-primary': 'Experience: Product Owner',
+  'experience-secondary': 'Experience: Business Analyst',
+  'experience-supporting': 'Experience: QA / Quality',
   'cover-letter': 'Cover Letter',
   'referral-message': 'Referral Message',
   'recruiter-message': 'Recruiter Message',
@@ -260,7 +260,7 @@ function buildExperienceBlocks(
     blocks.push(workEntryToBlock(work, bullets, source.id))
   }
 
-  for (const sectionType of ['experience-po', 'experience-ba', 'experience-qa'] as SectionType[]) {
+  for (const sectionType of ['experience-primary', 'experience-secondary', 'experience-supporting'] as SectionType[]) {
     const source = byType.get(sectionType)
     if (!source) continue
     const alreadyUsed = blocks.some(b => b.sourceArtifactSectionId === source.id)
@@ -289,9 +289,9 @@ function buildExperienceBlocks(
 
 function sectionTypeForWorkEntry(work: WorkEntry): SectionType | null {
   const text = `${work.title} ${work.company} ${work.domain}`.toLowerCase()
-  if (/\b(product owner|po)\b/.test(text)) return 'experience-po'
-  if (/\b(qa|quality|test|automation)\b/.test(text)) return 'experience-qa'
-  if (/\b(business analyst|product analyst|analyst|ba)\b/.test(text)) return 'experience-ba'
+  if (/\b(product owner|po)\b/.test(text)) return 'experience-primary'
+  if (/\b(qa|quality|test|automation)\b/.test(text)) return 'experience-supporting'
+  if (/\b(business analyst|product analyst|analyst|ba)\b/.test(text)) return 'experience-secondary'
   return null
 }
 

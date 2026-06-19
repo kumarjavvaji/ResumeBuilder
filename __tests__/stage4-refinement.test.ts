@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Stage 4 export refinement tests.
  *
  * Validates:
@@ -136,12 +136,12 @@ describe('B. Section isolation', () => {
     expect(rawText.sectionRefinements?.skills?.accepted).toBe(true)
 
     // Experience section is unchanged — no refinement entry
-    expect(rawText.sectionRefinements?.['experience-po']).toBeUndefined()
+    expect(rawText.sectionRefinements?.['experience-primary']).toBeUndefined()
     // Original experience bullets still in place
     expect(rawText.sections.experiences[0].bullets).toContain('Maintained Jira-tracked backlog of 200+ stories')
   })
 
-  it('B2: accepting experience-po refinement does not affect experience-ba or experience-qa', () => {
+  it('B2: accepting experience-primary refinement does not affect experience-secondary or experience-supporting', () => {
     const baBlock = makeExperienceBlock({
       roleId: 'role-ba',
       title: 'Business Analyst',
@@ -156,7 +156,7 @@ describe('B. Section isolation', () => {
         experiences: [makeExperienceBlock(), baBlock],
       },
       sectionRefinements: {
-        'experience-po': {
+        'experience-primary': {
           instruction: 'Reduce to 4 bullets',
           output: 'Product Owner\nAccenture | 2021 - 2024\n- Maintained Jira-tracked backlog\n- Coordinated release-ready scope',
           accepted: true,
@@ -166,9 +166,9 @@ describe('B. Section isolation', () => {
     })
 
     // PO is refined
-    expect(rawText.sectionRefinements?.['experience-po']?.accepted).toBe(true)
+    expect(rawText.sectionRefinements?.['experience-primary']?.accepted).toBe(true)
     // BA has no refinement
-    expect(rawText.sectionRefinements?.['experience-ba']).toBeUndefined()
+    expect(rawText.sectionRefinements?.['experience-secondary']).toBeUndefined()
     // Original BA bullets intact
     const baOriginal = rawText.sections.experiences.find(e => e.sourceArtifactSectionId === 'section-ba-id')
     expect(baOriginal?.bullets).toContain('Gathered requirements from stakeholders')
@@ -412,7 +412,7 @@ describe('D. Evidence guardrails', () => {
     }
   })
 
-  it('D8: section refinement for experience-po preserves original date range unless user changes it', () => {
+  it('D8: section refinement for experience-primary preserves original date range unless user changes it', () => {
     const refinedPoText = 'Product Owner\nAccenture | 2021 - 2024\n- Owned backlog of 200+ stories\n- Coordinated sprint delivery'
     const poRef: Stage4SectionRefinement = {
       instruction: 'Tighten to 4 bullets',

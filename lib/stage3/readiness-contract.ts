@@ -169,31 +169,35 @@ export function validateResumeReadiness(
 type RoleFamily = string
 
 function deriveRoleFamily(emphasis: EmphasisCategory, roleTitleLower: string): RoleFamily {
-  if (emphasis === 'QA') return 'qa'
-  if (emphasis === 'data') return 'product_analyst'
-  if (emphasis === 'BA') return 'business_analyst'
-  if (emphasis === 'PO') {
-    return roleTitleLower.includes('associate') ? 'associate_pm' : 'product_owner'
-  }
-  if (roleTitleLower.includes('product owner')) return 'product_owner'
-  if (roleTitleLower.includes('business analyst') || / ba /.test(roleTitleLower)) return 'business_analyst'
-  if (roleTitleLower.includes('product analyst')) return 'product_analyst'
-  if (/\bqa\b|quality|test engineer/.test(roleTitleLower)) return 'qa'
-  return 'product_owner'
+  // Title-based detection is primary
+  if (roleTitleLower.includes('product owner') || roleTitleLower.includes('product manager') ||
+      roleTitleLower.includes('program manager') || roleTitleLower.includes('scrum master')) return 'primary'
+  if (roleTitleLower.includes('analyst') || roleTitleLower.includes('business analyst') ||
+      roleTitleLower.includes('product analyst')) return 'secondary'
+  if (/\bqa\b|quality|test engineer|tester/.test(roleTitleLower)) return 'supporting'
+
+  // Emphasis string as fallback signal
+  const emphasisLower = emphasis.toLowerCase()
+  if (emphasisLower.includes('analyst') || emphasisLower.includes('data')) return 'secondary'
+  if (emphasisLower.includes('qa') || emphasisLower.includes('quality')) return 'supporting'
+
+  return 'primary'
 }
 
 function derivePosture(roleFamily: RoleFamily, roleTitleLower: string): string {
   switch (roleFamily) {
-    case 'associate_pm':
-      return 'tactical product delivery / business-to-IT execution / associate product management'
-    case 'product_owner':
-      return 'tactical product delivery / backlog execution / sprint delivery / stakeholder alignment'
-    case 'product_analyst':
-      return 'product analytics / data-backed decisions / KPI measurement / stakeholder recommendations'
-    case 'business_analyst':
-      return 'requirements elicitation / gap analysis / acceptance criteria / UAT / release readiness'
-    case 'qa':
-      return 'test automation / quality frameworks / release readiness / defect prevention'
+    case 'primary':
+      return roleTitleLower
+        ? `${roleTitleLower} / backlog execution / sprint delivery / stakeholder alignment`
+        : 'tactical product delivery / backlog execution / sprint delivery / stakeholder alignment'
+    case 'secondary':
+      return roleTitleLower
+        ? `${roleTitleLower} / requirements elicitation / gap analysis / acceptance criteria`
+        : 'requirements elicitation / gap analysis / acceptance criteria / UAT / release readiness'
+    case 'supporting':
+      return roleTitleLower
+        ? `${roleTitleLower} / release readiness / defect prevention`
+        : 'test automation / quality frameworks / release readiness / defect prevention'
     default:
       return roleTitleLower
         ? `product delivery targeting: ${roleTitleLower}`
@@ -202,7 +206,7 @@ function derivePosture(roleFamily: RoleFamily, roleTitleLower: string): string {
 }
 
 function buildSectionPlan(roleFamily: RoleFamily): ResumeReadinessSectionPlan {
-  const isQA = roleFamily === 'qa'
+  const isQA = roleFamily === 'supporting'
   return {
     summary: { purpose: 'positioning', maxSentences: 4, maxApproxLines: 4 },
     skills: { purpose: 'ats_support', maxRows: 5 },
@@ -246,8 +250,8 @@ function buildEvidenceRouting(
     if (atom.atomType === 'tool') {
       const sections: string[] = []
       if (atom.allowedUses.includes('skills')) sections.push('skills')
-      if (atom.allowedUses.includes('po_bullet')) sections.push('experience-po')
-      if (atom.allowedUses.includes('pa_bullet')) sections.push('experience-ba')
+      if (atom.allowedUses.includes('po_bullet')) sections.push('experience-primary')
+      if (atom.allowedUses.includes('pa_bullet')) sections.push('experience-secondary')
       if (sections.length > 0) routing[atom.text] = sections
     }
     if (atom.atomType === 'certification') {
@@ -262,10 +266,10 @@ function buildEvidenceRouting(
   ].join(' ').toLowerCase()
 
   if (/uat|user acceptance/i.test(jdText)) {
-    routing['UAT coordination'] = ['experience-ba', 'experience-po']
+    routing['UAT coordination'] = ['experience-secondary', 'experience-primary']
   }
   if (/backlog|sprint|roadmap/i.test(jdText)) {
-    routing['backlog execution'] = ['experience-po']
+    routing['backlog execution'] = ['experience-primary']
   }
   if (/travel/i.test(jdText)) {
     routing['travel willingness'] = [] // never in resume

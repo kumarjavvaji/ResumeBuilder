@@ -57,6 +57,9 @@ export function computeDownstreamPermission(
 
   if (onlyContextSources || coverageStatus === 'context_only') return 'context_only_do_not_claim'
   if (coverageStatus === 'covered' && hasProfileEvidence) return 'can_support_resume_claim'
+  // retrieval_gap: deterministic match suggests evidence exists — treat as needs_user_evidence,
+  // not gap_to_bridge, so downstream stages don't over-weight it as a hard gap.
+  if (coverageStatus === 'retrieval_gap') return 'needs_user_evidence'
   if (coverageStatus === 'partial' || coverageStatus === 'weakly_supported') return 'needs_user_evidence'
   if (coverageStatus === 'gap' || coverageStatus === 'needs_evidence' || hasProfileAbsence) return 'gap_to_bridge'
   if (onlyInference) return 'inference_only'
@@ -72,7 +75,8 @@ function inferJdSourceType(req: JDRequirement): Stage1SourceType {
 
 export function buildJDRequirementFinding(req: JDRequirement, index: number): Stage1Finding {
   const coverageStatus: Stage1Finding['coverageStatus'] =
-    req.userCoverageStatus === 'covered' ? 'covered'
+    req.classification === 'retrieval_gap' ? 'retrieval_gap' as Stage1Finding['coverageStatus']
+      : req.userCoverageStatus === 'covered' ? 'covered'
       : req.userCoverageStatus === 'partial' ? 'partial'
       : req.userCoverageStatus === 'gap' ? 'gap'
       : 'needs_evidence'

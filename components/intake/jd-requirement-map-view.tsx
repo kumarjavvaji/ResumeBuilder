@@ -1,4 +1,5 @@
 'use client'
+import React from 'react'
 import type { JDRequirementMap, JDRequirement, Stage1Finding } from '@/contracts'
 import { Badge } from '@/components/shared/badge'
 import { findFindingByTopic, TraceChip, TraceableBullet } from './stage1-findings-view'
@@ -16,6 +17,8 @@ export function JDRequirementMapView({
   const needsEvidence = map.needsEvidenceItems?.length
     ? map.needsEvidenceItems
     : (map.unsupportedRequirements ?? [])
+
+  const retrievalGapRows = map.required.filter(r => r.classification === 'retrieval_gap')
 
   return (
     <div className="space-y-6">
@@ -63,6 +66,23 @@ export function JDRequirementMapView({
           </ul>
         </div>
       )}
+
+      {retrievalGapRows.length > 0 && (
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-violet-600 mb-1">
+            Retrieval Gaps
+          </h3>
+          <p className="text-xs text-gray-400 mb-2">
+            Deterministic matching found profile evidence for these, but the LLM assessment showed a gap.
+            Likely a retrieval miss — verify and confirm in Stage 2 rather than treating as a true gap.
+          </p>
+          <div className="space-y-2">
+            {retrievalGapRows.map((r, i) => (
+              <RequirementRow key={i} r={r} finding={showTrace ? findFindingByTopic(findings, r.text) : undefined} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -102,7 +122,7 @@ function RequirementRow({ r, finding }: { r: JDRequirement; finding?: Stage1Find
   return (
     <div className="text-sm">
       <div className="flex items-start gap-2">
-        <CoverageIndicator status={r.userCoverageStatus} />
+        <CoverageIndicator status={r.userCoverageStatus} classification={r.classification} />
         <span className="text-gray-700 flex-1">{r.rowLabel || r.text}</span>
         <span className="text-xs text-gray-400 shrink-0">{r.category}</span>
         <TraceChip finding={finding} />
@@ -140,6 +160,17 @@ function RequirementRow({ r, finding }: { r: JDRequirement; finding?: Stage1Find
           {r.stage2Implication && (
             <p className="text-xs text-indigo-700"><span className="font-semibold">Stage 2 implication:</span> {r.stage2Implication}</p>
           )}
+          {r.profileEvidenceStrength && r.profileEvidenceStrength !== 'none' && (
+            <div className="text-xs text-green-700 space-y-0.5">
+              <p>
+                <span className="font-semibold">Evidence strength:</span>{' '}
+                {r.profileEvidenceStrength} ({r.matchedClaimIds?.length ?? 0} matched)
+              </p>
+              {r.matchedEvidenceTexts?.map((t, i) => (
+                <p key={i} className="italic text-green-600">· {t}</p>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -157,12 +188,16 @@ function RequirementRow({ r, finding }: { r: JDRequirement; finding?: Stage1Find
   )
 }
 
-function CoverageIndicator({ status }: { status: JDRequirement['userCoverageStatus'] }) {
-  const map = {
+function CoverageIndicator({ status, classification }: { status: JDRequirement['userCoverageStatus']; classification?: string }) {
+  if (classification === 'retrieval_gap') {
+    return <Badge variant="partial">retrieval gap</Badge>
+  }
+  const map: Record<string, React.ReactElement> = {
     covered: <Badge variant="covered">covered</Badge>,
+    partially_covered: <Badge variant="partial">partial</Badge>,
     partial: <Badge variant="partial">partial</Badge>,
     gap: <Badge variant="gap">gap</Badge>,
     unknown: <Badge variant="neutral">?</Badge>,
   }
-  return map[status]
+  return map[status] ?? <Badge variant="neutral">?</Badge>
 }

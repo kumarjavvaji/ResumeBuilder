@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useMemo, useState } from 'react'
 import type {
@@ -56,13 +56,13 @@ import { inputCls, textareaCls } from '@/lib/input-cls'
 const REQUIRED_LABELS: Record<string, string> = {
   summary: 'Professional Summary',
   skills: 'Skills',
-  'experience-po': 'Experience: Product Owner',
-  'experience-ba': 'Experience: Business Analyst',
-  'experience-qa': 'Experience: QA / Quality',
+  'experience-primary': 'Experience: Product Owner',
+  'experience-secondary': 'Experience: Business Analyst',
+  'experience-supporting': 'Experience: QA / Quality',
 }
 
 // Keys that appear in sectionRefinements; 'education' is profile-assembled (not an ArtifactSection type)
-const REFINEABLE_SECTION_KEYS = ['summary', 'skills', 'experience-po', 'experience-ba', 'experience-qa', 'education'] as const
+const REFINEABLE_SECTION_KEYS = ['summary', 'skills', 'experience-primary', 'experience-secondary', 'experience-supporting', 'education'] as const
 type RefineKey = typeof REFINEABLE_SECTION_KEYS[number]
 
 // ─── Context for LLM refinement calls ────────────────────────────────────────
@@ -128,13 +128,13 @@ function effectiveFullText(rawText: Stage4RawResumeText, artifactSections: Artif
   const education = effectiveSectionText(rawText, 'education', artifactSections)
 
   // For experience: per-type accepted refinements replace entire type; original blocks fill the rest
-  const poRef = rawText.sectionRefinements?.['experience-po']
-  const baRef = rawText.sectionRefinements?.['experience-ba']
-  const qaRef = rawText.sectionRefinements?.['experience-qa']
+  const poRef = rawText.sectionRefinements?.['experience-primary']
+  const baRef = rawText.sectionRefinements?.['experience-secondary']
+  const qaRef = rawText.sectionRefinements?.['experience-supporting']
 
-  const poSection = artifactSections.find(s => s.type === 'experience-po')
-  const baSection = artifactSections.find(s => s.type === 'experience-ba')
-  const qaSection = artifactSections.find(s => s.type === 'experience-qa')
+  const poSection = artifactSections.find(s => s.type === 'experience-primary')
+  const baSection = artifactSections.find(s => s.type === 'experience-secondary')
+  const qaSection = artifactSections.find(s => s.type === 'experience-supporting')
 
   const experienceChunks: string[] = []
   for (const block of rawText.sections.experiences) {
@@ -716,11 +716,11 @@ function ExperienceSections({
   onAccept: (key: string) => void
   onReject: (key: string) => void
 }) {
-  const experienceSectionTypes = ['experience-po', 'experience-ba', 'experience-qa'] as const
+  const experienceSectionTypes = ['experience-primary', 'experience-secondary', 'experience-supporting'] as const
   const EXPERIENCE_LABELS: Record<string, string> = {
-    'experience-po': 'Product Owner Experience',
-    'experience-ba': 'Business Analyst Experience',
-    'experience-qa': 'QA / Quality Experience',
+    'experience-primary': 'Product Owner Experience',
+    'experience-secondary': 'Business Analyst Experience',
+    'experience-supporting': 'QA / Quality Experience',
   }
 
   const sections: Array<{ key: string; label: string; text: string }> = []
@@ -1125,9 +1125,9 @@ function SectionRefinementPanel({
 const SECTION_PLACEHOLDERS: Partial<Record<RefineKey, string>> = {
   summary: 'e.g. "Lead with fintech experience" or "Tighten to 3 sentences"',
   skills: 'e.g. "Remove Azure DevOps and emphasize Jira" or "Add SpecFlow under Testing"',
-  'experience-po': 'e.g. "Reduce by 2 lines" or "Emphasize backlog ownership over delivery metrics"',
-  'experience-ba': 'e.g. "Lead with gap analysis work" or "Tighten to 4 bullets"',
-  'experience-qa': 'e.g. "Emphasize automation over manual testing" or "Add SpecFlow if evidenced"',
+  'experience-primary': 'e.g. "Reduce by 2 lines" or "Emphasize backlog ownership over delivery metrics"',
+  'experience-secondary': 'e.g. "Lead with gap analysis work" or "Tighten to 4 bullets"',
+  'experience-supporting': 'e.g. "Emphasize automation over manual testing" or "Add SpecFlow if evidenced"',
   education: 'e.g. "Add CSPO year if from bridge answers" or "Separate certifications from degrees"',
 }
 

@@ -240,18 +240,18 @@ function makeResult(
  */
 function suggestAlternativeSection(bulletText: string, currentSection: SectionType): SectionType | null {
   const lower = bulletText.toLowerCase()
-  if (currentSection !== 'experience-po' &&
+  if (currentSection !== 'experience-primary' &&
       (lower.includes('backlog') || lower.includes('sprint') || lower.includes('roadmap') || lower.includes('product owner'))) {
-    return 'experience-po'
+    return 'experience-primary'
   }
-  if (currentSection !== 'experience-ba' &&
+  if (currentSection !== 'experience-secondary' &&
       (lower.includes('requirements') || lower.includes('acceptance criteria') || lower.includes('analyst') ||
        lower.includes('salesforce') || lower.includes('triage'))) {
-    return 'experience-ba'
+    return 'experience-secondary'
   }
-  if (currentSection !== 'experience-qa' &&
-      (lower.includes('test') || lower.includes('qa') || lower.includes('quality') || lower.includes('specflow'))) {
-    return 'experience-qa'
+  if (currentSection !== 'experience-supporting' &&
+      (lower.includes('test') || lower.includes('supporting') || lower.includes('quality') || lower.includes('specflow'))) {
+    return 'experience-supporting'
   }
   return null
 }

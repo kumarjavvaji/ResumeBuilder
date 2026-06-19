@@ -107,16 +107,16 @@ export function buildSectionQualityGate(sectionType: SectionType, ctx?: QualityG
       )
       break
 
-    case 'experience-po':
+    case 'experience-primary':
       lines.push(
         '',
-        'PRODUCT OWNER BULLET RULES:',
+        'PRIMARY ROLE BULLET RULES:',
         '- 1–2 lines per bullet maximum — no paragraph-length bullets.',
         '- One primary claim per bullet — do not chain 4–5 concepts with commas and dashes.',
         '- Use "~" for all approximations — never "approximately".',
         ctx?.poDateRange
-          ? `- Date range: ${ctx.poDateRange}. Do not hedge as "PO-adjacent" or "acting PO".`
-          : '- Use the exact date range from the candidate profile for the PO role. Do not hedge as "PO-adjacent" or "acting PO" if the profile treats this as the primary PO role.',
+          ? `- Date range: ${ctx.poDateRange}. Do not hedge the role title as acting or informal.`
+          : '- Use the exact date range from the candidate profile for the primary role. Do not hedge the title if the profile treats this as the primary role.',
         '- Roadmap framing: use "executed leadership-sponsored roadmap" or "translated roadmap priorities into release-ready scope."',
         '  Do NOT use executive-strategy language that implies independent product vision ownership.',
         ctx?.verifiedMetrics?.length
@@ -127,41 +127,41 @@ export function buildSectionQualityGate(sectionType: SectionType, ctx?: QualityG
         '  □ Each bullet is 1–2 lines?',
         '  □ "approximately" replaced with "~"?',
         '  □ Roadmap language bounded to execution, not strategy ownership?',
+        '  □ No hedging of the primary role title?',
       )
       break
 
-    case 'experience-ba':
+    case 'experience-secondary':
       lines.push(
         '',
-        'PRODUCT ANALYST / BUSINESS ANALYST BULLET RULES:',
+        'SECONDARY ROLE BULLET RULES:',
         '- 1–2 lines per bullet maximum.',
         '- Use "~" for approximations.',
-        '- Do NOT claim "Led all Scrum ceremonies", "Owned product roadmap", or "Managed sprint delivery" unless directly evidenced.',
-        '- If Scrum ceremony support is mentioned, phrase as:',
-        '  "Supported backlog refinement, sprint demos, and ceremony preparation by grounding discussion in client impact and stakeholder feedback."',
+        '- Do NOT claim responsibilities that belong to the primary or senior role unless directly evidenced.',
+        '  Examples of overclaim to avoid: "Led all Scrum ceremonies", "Owned product roadmap", "Managed sprint delivery".',
         '- Preferred phrasing verbs: Partnered, Refined, Recommended, Translated, Triaged, Maintained, Analyzed.',
-        '- Do NOT mirror PO framing — PA bullets should sound like analytical and requirements support, not backlog ownership.',
+        '- Bullets should reflect the secondary role\'s scope — do not mirror the primary role framing.',
         '',
         'FINAL CHECK:',
-        '  □ No "Led Scrum ceremonies", "Owned roadmap", "Managed sprint delivery"?',
+        '  □ No overclaiming of primary-role responsibilities?',
         '  □ Each bullet is 1–2 lines?',
         '  □ "approximately" replaced with "~"?',
       )
       break
 
-    case 'experience-qa':
+    case 'experience-supporting':
       lines.push(
         '',
-        'QA BULLET RULES:',
+        'SUPPORTING ROLE BULLET RULES:',
         '- 1–2 lines per bullet maximum.',
         '- Use "~" for approximations.',
-        '- QA is a supporting differentiator for this role — keep it focused on UAT readiness, release validation, defect reduction.',
-        '- Do not make QA the dominant identity of the resume.',
+        '- Supporting role is a differentiator — keep bullets focused on the specific competency being demonstrated.',
+        '- Do not let the supporting role dominate the resume narrative.',
         '',
         'FINAL CHECK:',
         '  □ Each bullet is 1–2 lines?',
         '  □ "approximately" replaced with "~"?',
-        '  □ QA positioned as supporting differentiator, not dominant?',
+        '  □ Supporting role positioned as differentiator, not dominant identity?',
       )
       break
 
@@ -206,18 +206,18 @@ SKILLS CHECK:
 EXPERIENCE BULLETS CHECK:
   □ All bullets are 1–2 lines — no paragraph-length bullets
   □ "approximately" replaced with "~" everywhere
-  □ PA section does NOT claim "Led Scrum ceremonies", "Owned roadmap", "Managed sprint delivery"
-  □ PO roadmap language bounded to execution ("executed leadership-sponsored roadmap")
+  □ Secondary/supporting sections do NOT claim primary-role responsibilities (roadmap ownership, sprint delivery lead, etc.)
+  □ Primary-role roadmap language bounded to execution ("executed leadership-sponsored roadmap")
 
 CONTENT SAFETY CHECK:
   □ No travel willingness as a resume bullet
   □ No Azure DevOps unless evidenced
   □ No invented employers, tools, titles, certifications, dates, or metrics
-  □ CSPO cited only if present in education or bridge answers
-  □ QA is supportive, not the dominant identity
+  □ Certifications cited only if present in education, certifications, or bridge answers
+  □ Supporting roles are supportive, not the dominant identity
 
 POSTURE CHECK:
-  □ Tone fits Associate IT PM / tactical product delivery
+  □ Tone fits the target role posture
   □ JD terms appear in bullets, not only in Skills
   □ Realistic for two pages
 

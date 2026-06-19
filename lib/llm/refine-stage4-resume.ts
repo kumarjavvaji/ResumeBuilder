@@ -64,7 +64,7 @@ export async function refineFullResumeExport(opts: FullResumeRefineOptions): Pro
 
   // Derive older/irrelevant employers from profile — replaces hardcoded employer names in gate
   const primaryKeywords = ['product owner', 'product manager', 'business analyst',
-    'product analyst', 'systems analyst', 'data analyst', 'qa', 'quality']
+    'product analyst', 'systems analyst', 'data analyst', 'supporting', 'quality']
   const jdText = [...jdMap.required, ...jdMap.niceToHave].map(r => r.text).join(' ').toLowerCase()
   const seen = new Set<string>()
   const olderEmployersToExclude: string[] = []

@@ -71,6 +71,9 @@ function minimalBundle(): ScopedEvidenceBundle {
         skills: ['Jira'],
       },
     ],
+    sectionType: 'summary',
+    allowedMetrics: ['3,000+ support signals', '4M+ MAUs'],
+    globalGapWarnings: [],
     normalizedBridgeEvidence: [],
     uncertainBridgeEvidence: [],
     scope: {
@@ -183,12 +186,12 @@ describe('2. Anthropic prompt includes evaluator lens', () => {
 
   it('serialized brief includes knockout risks', () => {
     const brief = buildArtifactGenerationBrief({
-      sectionType: 'experience-ba',
+      sectionType: 'experience-secondary',
       emphasis: 'BA',
       roleTitle: 'Product Analyst',
       company: 'Alliant',
       jdMap: analyticsJDMap(),
-      bundle: bundleForSection('experience-ba'),
+      bundle: bundleForSection('experience-secondary'),
       acceptedSignals: [],
       globalSignals: [],
       rejectedPhrases: [],
@@ -335,14 +338,14 @@ describe('5. Skills generation uses JD-aligned ATS terms', () => {
 // â”€â”€â”€ 6. PO section is reframed for Product Analyst target â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('6. PO section reframed for Product Analyst role', () => {
-  it('experience-po deemphasis includes roadmap ownership language', () => {
+  it('experience-primary deemphasis includes roadmap ownership language', () => {
     const brief = buildArtifactGenerationBrief({
-      sectionType: 'experience-po',
+      sectionType: 'experience-primary',
       emphasis: 'BA',
       roleTitle: 'Product Analyst â€“ Member Insights',
       company: 'Alliant',
       jdMap: analyticsJDMap(),
-      bundle: bundleForSection('experience-po'),
+      bundle: bundleForSection('experience-primary'),
       acceptedSignals: [],
       globalSignals: [],
       rejectedPhrases: [],
@@ -352,14 +355,14 @@ describe('6. PO section reframed for Product Analyst role', () => {
     expect(deemphasis).toMatch(/roadmap|backlog grooming/)
   })
 
-  it('experience-po emphasis includes KPI-informed prioritization for analytics role', () => {
+  it('experience-primary emphasis includes KPI-informed prioritization for analytics role', () => {
     const brief = buildArtifactGenerationBrief({
-      sectionType: 'experience-po',
+      sectionType: 'experience-primary',
       emphasis: 'BA',
       roleTitle: 'Product Analyst',
       company: 'Alliant',
       jdMap: analyticsJDMap(),
-      bundle: bundleForSection('experience-po'),
+      bundle: bundleForSection('experience-primary'),
       acceptedSignals: [],
       globalSignals: [],
       rejectedPhrases: [],
@@ -369,14 +372,14 @@ describe('6. PO section reframed for Product Analyst role', () => {
     expect(emphasis).toMatch(/kpi|analytic|data.backed/)
   })
 
-  it('experience-po section priority is supporting for analytics role', () => {
+  it('experience-primary section priority is supporting for analytics role', () => {
     const brief = buildArtifactGenerationBrief({
-      sectionType: 'experience-po',
+      sectionType: 'experience-primary',
       emphasis: 'BA',
       roleTitle: 'Product Analyst',
       company: 'Alliant',
       jdMap: analyticsJDMap(),
-      bundle: bundleForSection('experience-po'),
+      bundle: bundleForSection('experience-primary'),
       acceptedSignals: [],
       globalSignals: [],
       rejectedPhrases: [],
@@ -389,14 +392,14 @@ describe('6. PO section reframed for Product Analyst role', () => {
 // â”€â”€â”€ 7. Product Analyst section > QA section priority for analytics role â”€â”€â”€â”€â”€
 
 describe('7. Product Analyst section outranks QA for analytics role', () => {
-  it('experience-ba is primary for analytics role', () => {
+  it('experience-secondary is primary for analytics role', () => {
     const brief = buildArtifactGenerationBrief({
-      sectionType: 'experience-ba',
+      sectionType: 'experience-secondary',
       emphasis: 'BA',
       roleTitle: 'Product Analyst',
       company: 'Alliant',
       jdMap: analyticsJDMap(),
-      bundle: bundleForSection('experience-ba'),
+      bundle: bundleForSection('experience-secondary'),
       acceptedSignals: [],
       globalSignals: [],
       rejectedPhrases: [],
@@ -405,14 +408,14 @@ describe('7. Product Analyst section outranks QA for analytics role', () => {
     expect(brief.artifactStrategy.sectionPriority).toBe('primary')
   })
 
-  it('experience-qa is context (lowest priority) for analytics role', () => {
+  it('experience-supporting is context (lowest priority) for analytics role', () => {
     const brief = buildArtifactGenerationBrief({
-      sectionType: 'experience-qa',
+      sectionType: 'experience-supporting',
       emphasis: 'BA',
       roleTitle: 'Product Analyst',
       company: 'Alliant',
       jdMap: analyticsJDMap(),
-      bundle: bundleForSection('experience-qa'),
+      bundle: bundleForSection('experience-supporting'),
       acceptedSignals: [],
       globalSignals: [],
       rejectedPhrases: [],
@@ -421,23 +424,23 @@ describe('7. Product Analyst section outranks QA for analytics role', () => {
     expect(brief.artifactStrategy.sectionPriority).toBe('context')
   })
 
-  it('experience-ba line budget is larger than experience-qa for analytics role', () => {
+  it('experience-secondary line budget is larger than experience-supporting for analytics role', () => {
     const baBrief = buildArtifactGenerationBrief({
-      sectionType: 'experience-ba',
+      sectionType: 'experience-secondary',
       emphasis: 'BA',
       roleTitle: 'Product Analyst',
       company: 'Alliant',
       jdMap: analyticsJDMap(),
-      bundle: bundleForSection('experience-ba'),
+      bundle: bundleForSection('experience-secondary'),
       acceptedSignals: [], globalSignals: [], rejectedPhrases: [], constraints: [],
     })
     const qaBrief = buildArtifactGenerationBrief({
-      sectionType: 'experience-qa',
+      sectionType: 'experience-supporting',
       emphasis: 'BA',
       roleTitle: 'Product Analyst',
       company: 'Alliant',
       jdMap: analyticsJDMap(),
-      bundle: bundleForSection('experience-qa'),
+      bundle: bundleForSection('experience-supporting'),
       acceptedSignals: [], globalSignals: [], rejectedPhrases: [], constraints: [],
     })
     // BA gets 4â€“6 bullets, QA gets 3â€“4
@@ -585,12 +588,12 @@ describe('10. Section refinement prompt scopes correctly', () => {
       acceptedSignals: [], globalSignals: [], rejectedPhrases: [], constraints: [],
     })
     const sectionBBrief = buildArtifactGenerationBrief({
-      sectionType: 'experience-ba',
+      sectionType: 'experience-secondary',
       emphasis: 'BA',
       roleTitle: 'Product Analyst',
       company: 'Alliant',
       jdMap: analyticsJDMap(),
-      bundle: bundleForSection('experience-ba'),
+      bundle: bundleForSection('experience-secondary'),
       acceptedSignals: [], globalSignals: [], rejectedPhrases: [], constraints: [],
     })
 
