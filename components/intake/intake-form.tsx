@@ -14,6 +14,7 @@ import {
   setStage1JobFailed,
   getActiveJobId,
   setActiveJobId,
+  clearActiveJobId,
 } from '@/lib/storage/stage1-jobs'
 import type {
   TargetIntake,
@@ -41,7 +42,12 @@ import { deriveStageStatuses, canCompleteStage1 } from '@/contracts'
 import type { Stage1PipelineResult } from '@/lib/llm/stage1/pipeline'
 import { Spinner } from '@/components/shared/spinner'
 import { inputCls, textareaCls } from '@/lib/input-cls'
-import { JDRequirementMapView } from './jd-requirement-map-view'
+import {
+  JDRequirementMapView,
+  canonicalRequirementSources,
+  resolveRequirementDisplayItems,
+  type RequirementDisplaySource,
+} from './jd-requirement-map-view'
 import { findFindingByTopic, TraceChip, TraceableBullet, computeUnmatchedFindings, UnmatchedFindingsDebug } from './stage1-findings-view'
 
 // ─── Stage1Status derivation ──────────────────────────────────────────────────
@@ -623,8 +629,8 @@ function DomainIQSection({
             </div>
             <div>
               <label className="block text-xs font-medium text-blue-950 mb-1">User notes (optional)</label>
-              <input
-                className={inputCls}
+              <textarea
+                className={`${textareaCls} min-h-[88px] resize-y`}
                 value={quickNotes}
                 onChange={e => setQuickNotes(e.target.value)}
                 placeholder="Known workflows, users, risks, or priorities"
@@ -1093,8 +1099,17 @@ export function IntakeForm() {
           setJDSourceType(job.jdSourceType)
           setDomainIQText(job.domainIQText)
         } else if (job && job.status === 'completed' && job.finalArtifact) {
+          setStage1Job(job)
           setResult(job.finalArtifact as Stage1PipelineResult)
           setProgressSteps(jobToProgressSteps(job))
+          setRoleTitle(job.roleTitle)
+          setCompany(job.company)
+          setJDText(job.jdText)
+          setJDSourceType(job.jdSourceType)
+          setDomainIQText(job.domainIQText)
+        } else {
+          // Failed or missing jobs cannot be rehydrated into a completed review state.
+          clearActiveJobId()
         }
       })
     }
@@ -1388,10 +1403,13 @@ export function IntakeForm() {
         riskGaps: result.synthesis.riskGaps,
         emphasisRecommendation: result.synthesis.emphasisRecommendation,
         fitAnalysis: result.fitAnalysis,
+        // Link to Stage1Job so Stage 2 can read Pass F output for provenance-aware questions
+        stage1JobId: stage1Job?.id,
         status: 'intake',
         stageStatuses: deriveStageStatuses('intake'),
       }
       await saveSession(session)
+      clearActiveJobId()
       router.push(`/sessions/${session.id}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save session. Please try again.')
@@ -1557,7 +1575,12 @@ export function IntakeForm() {
               Show evidence trace
             </label>
           </div>
-          <IntakeSynthesisView synthesis={result.synthesis} findings={result.fitAnalysis?.findings} showTrace={showTrace} />
+          <IntakeSynthesisView
+            synthesis={result.synthesis}
+            findings={result.fitAnalysis?.findings}
+            showTrace={showTrace}
+            requirementSources={canonicalRequirementSources(result.requirementMap, result.fitAnalysis?.requirements)}
+          />
           <JDRequirementMapView map={result.requirementMap} findings={result.fitAnalysis?.findings} showTrace={showTrace} />
           {showTrace && (
             <UnmatchedFindingsDebug
@@ -1581,6 +1604,7 @@ function IntakeSynthesisView({
   synthesis,
   findings,
   showTrace,
+  requirementSources,
 }: {
   synthesis: {
     companySummary: string
@@ -1606,8 +1630,26 @@ function IntakeSynthesisView({
   }
   findings?: import('@/contracts').Stage1Finding[]
   showTrace: boolean
+  requirementSources: RequirementDisplaySource[]
 }) {
   const companyContextFinding = showTrace ? findFindingByTopic(findings, 'company_context') : undefined
+  const riskGapItems = resolveRequirementDisplayItems(synthesis.riskGaps, requirementSources)
+  const trueCandidateGapItems = resolveRequirementDisplayItems(
+    synthesis.riskGapBreakdown?.trueCandidateGaps,
+    requirementSources
+  )
+  const weakButBridgeableItems = resolveRequirementDisplayItems(
+    synthesis.riskGapBreakdown?.weakButBridgeable,
+    requirementSources
+  )
+  const retrievalGapItems = resolveRequirementDisplayItems(
+    synthesis.riskGapBreakdown?.retrievalGaps,
+    requirementSources
+  )
+  const retrievalGapsFlaggedItems = resolveRequirementDisplayItems(
+    synthesis.qualityAudit?.retrievalGapsFlagged,
+    requirementSources
+  )
   return (
     <div className="space-y-5">
       <div>
@@ -1615,11 +1657,11 @@ function IntakeSynthesisView({
           <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Company Context</h3>
           {showTrace && <TraceChip finding={companyContextFinding} label="Why" />}
         </div>
-        <p className="text-sm text-gray-700">{synthesis.companySummary}</p>
+        <p className="text-sm leading-relaxed break-words text-gray-800">{synthesis.companySummary}</p>
       </div>
       <div>
         <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Fit Hypothesis</h3>
-        <p className="text-sm text-gray-700">{synthesis.fitHypothesis}</p>
+        <p className="text-sm leading-relaxed break-words text-gray-800">{synthesis.fitHypothesis}</p>
         {showTrace && (
           <p className="text-xs text-gray-400 italic mt-1">No formal trace yet</p>
         )}
@@ -1630,15 +1672,15 @@ function IntakeSynthesisView({
           {synthesis.emphasisRecommendation}
         </span>
       </div>
-      {synthesis.riskGaps.length > 0 && (
+      {riskGapItems.length > 0 && (
         <div>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-amber-600 mb-2">Risk / Gap Areas</h3>
           <ul className="space-y-1">
-            {synthesis.riskGaps.map((gap, i) => (
+            {riskGapItems.map((gap, i) => (
               <TraceableBullet
                 key={i}
-                text={gap}
-                finding={showTrace ? findFindingByTopic(findings, gap) : undefined}
+                text={gap.display}
+                finding={showTrace ? findFindingByTopic(findings, gap.original) ?? findFindingByTopic(findings, gap.display) : undefined}
                 className="text-sm text-amber-700"
               />
             ))}
@@ -1648,33 +1690,33 @@ function IntakeSynthesisView({
 
       {synthesis.riskGapBreakdown && (
         <div className="border border-amber-100 bg-amber-50/40 rounded-md px-3 py-3 space-y-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-amber-700">Risk / Gap Breakdown</h3>
-          {synthesis.riskGapBreakdown.trueCandidateGaps.length > 0 && (
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-amber-800">Risk / Gap Breakdown</h3>
+          {trueCandidateGapItems.length > 0 && (
             <div>
               <p className="text-xs font-medium text-red-600 mb-1">True Gaps</p>
-              <ul className="space-y-0.5">
-                {synthesis.riskGapBreakdown.trueCandidateGaps.map((g, i) => (
-                  <li key={i} className="text-xs text-red-700">· {g}</li>
+              <ul className="space-y-1">
+                {trueCandidateGapItems.map((g, i) => (
+                  <li key={i} className="text-sm leading-relaxed break-words text-gray-800">· {g.display}</li>
                 ))}
               </ul>
             </div>
           )}
-          {synthesis.riskGapBreakdown.weakButBridgeable.length > 0 && (
+          {weakButBridgeableItems.length > 0 && (
             <div>
               <p className="text-xs font-medium text-amber-600 mb-1">Weak but Bridgeable</p>
-              <ul className="space-y-0.5">
-                {synthesis.riskGapBreakdown.weakButBridgeable.map((g, i) => (
-                  <li key={i} className="text-xs text-amber-700">· {g}</li>
+              <ul className="space-y-1">
+                {weakButBridgeableItems.map((g, i) => (
+                  <li key={i} className="text-sm leading-relaxed break-words text-gray-800">· {g.display}</li>
                 ))}
               </ul>
             </div>
           )}
-          {synthesis.riskGapBreakdown.retrievalGaps.length > 0 && (
+          {retrievalGapItems.length > 0 && (
             <div>
               <p className="text-xs font-medium text-violet-600 mb-1">Retrieval Gaps (likely in profile)</p>
-              <ul className="space-y-0.5">
-                {synthesis.riskGapBreakdown.retrievalGaps.map((g, i) => (
-                  <li key={i} className="text-xs text-violet-700">· {g}</li>
+              <ul className="space-y-1">
+                {retrievalGapItems.map((g, i) => (
+                  <li key={i} className="text-sm leading-relaxed break-words text-gray-800">· {g.display}</li>
                 ))}
               </ul>
             </div>
@@ -1684,13 +1726,13 @@ function IntakeSynthesisView({
 
       {synthesis.resumeDirection && (
         <div className="border border-indigo-100 bg-indigo-50/40 rounded-md px-3 py-3 space-y-2">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-indigo-600">Resume Direction</h3>
-          <p className="text-xs text-indigo-800"><span className="font-semibold">Summary:</span> {synthesis.resumeDirection.summaryGuidance}</p>
-          <p className="text-xs text-indigo-800"><span className="font-semibold">Skills:</span> {synthesis.resumeDirection.skillsGuidance}</p>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-indigo-700">Resume Direction</h3>
+          <p className="text-sm leading-relaxed break-words text-gray-800"><span className="font-semibold text-indigo-700">Summary:</span> {synthesis.resumeDirection.summaryGuidance}</p>
+          <p className="text-sm leading-relaxed break-words text-gray-800"><span className="font-semibold text-indigo-700">Skills:</span> {synthesis.resumeDirection.skillsGuidance}</p>
           {synthesis.resumeDirection.experienceBulletGuidance.length > 0 && (
-            <ul className="space-y-0.5 mt-1">
+            <ul className="space-y-1 mt-1">
               {synthesis.resumeDirection.experienceBulletGuidance.map((g, i) => (
-                <li key={i} className="text-xs text-indigo-700">· {g}</li>
+                <li key={i} className="text-sm leading-relaxed break-words text-gray-800">· {g}</li>
               ))}
             </ul>
           )}
@@ -1706,7 +1748,7 @@ function IntakeSynthesisView({
             {synthesis.qualityAudit.compoundRequirementsSplit.length > 0 && (
               <div>
                 <p className="text-xs font-medium text-gray-600 mb-0.5">Compound requirements split:</p>
-                <ul className="space-y-0.5">
+                <ul className="space-y-1">
                   {synthesis.qualityAudit.compoundRequirementsSplit.map((s, i) => (
                     <li key={i} className="text-xs text-gray-500">· {s}</li>
                   ))}
@@ -1716,19 +1758,19 @@ function IntakeSynthesisView({
             {synthesis.qualityAudit.contradictionsResolved.length > 0 && (
               <div>
                 <p className="text-xs font-medium text-gray-600 mb-0.5">Contradictions resolved:</p>
-                <ul className="space-y-0.5">
+                <ul className="space-y-1">
                   {synthesis.qualityAudit.contradictionsResolved.map((s, i) => (
                     <li key={i} className="text-xs text-gray-500">· {s}</li>
                   ))}
                 </ul>
               </div>
             )}
-            {synthesis.qualityAudit.retrievalGapsFlagged.length > 0 && (
+            {retrievalGapsFlaggedItems.length > 0 && (
               <div>
                 <p className="text-xs font-medium text-violet-600 mb-0.5">Retrieval gaps flagged:</p>
-                <ul className="space-y-0.5">
-                  {synthesis.qualityAudit.retrievalGapsFlagged.map((s, i) => (
-                    <li key={i} className="text-xs text-violet-600">· {s}</li>
+                <ul className="space-y-1">
+                  {retrievalGapsFlaggedItems.map((s, i) => (
+                    <li key={i} className="text-xs text-violet-600">· {s.display}</li>
                   ))}
                 </ul>
               </div>
@@ -1736,7 +1778,7 @@ function IntakeSynthesisView({
             {synthesis.qualityAudit.stage2QuestionsSuppressed.length > 0 && (
               <div>
                 <p className="text-xs font-medium text-green-700 mb-0.5">Stage 2 questions suppressed (already answered):</p>
-                <ul className="space-y-0.5">
+                <ul className="space-y-1">
                   {synthesis.qualityAudit.stage2QuestionsSuppressed.map((s, i) => (
                     <li key={i} className="text-xs text-green-600">· {s}</li>
                   ))}

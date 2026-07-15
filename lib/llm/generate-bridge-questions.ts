@@ -1,5 +1,6 @@
 import { anthropic, MODEL } from './client'
 import type { BridgeQuestion, JDRequirement, JDRequirementMap, UserProfile, EmphasisCategory, FitAnalysis } from '@/contracts'
+export { convertCandidatesToBridgeQuestions } from './convert-bridge-candidates'
 
 interface BridgeQuestionRaw {
   question: string

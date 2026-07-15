@@ -21,6 +21,7 @@ import type {
   Stage4RoleFamily,
   Stage4SectionPlan,
   Stage4SessionDirection,
+  ThemeWarning,
   UserProfile,
 } from '@/contracts'
 import { validateBulletMetrics } from '@/lib/validators/metric-quality'
@@ -303,6 +304,93 @@ function deriveRequiredBulletThemes(jdTextLower: string): string[] {
   return themes
 }
 
+// ─── Skills category parser ───────────────────────────────────────────────────
+
+interface SkillCategory { label: string; items: string[] }
+
+/**
+ * Parses skills section text into structured categories.
+ * A category row is any line containing a colon: "Label: item1, item2, ..."
+ * Lines without colons are ignored for category counting purposes.
+ */
+function parseSkillCategories(text: string): SkillCategory[] {
+  return text
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l.includes(':'))
+    .map(l => {
+      const colon = l.indexOf(':')
+      const label = l.slice(0, colon).trim()
+      const items = l.slice(colon + 1).split(',').map(s => s.trim()).filter(Boolean)
+      return { label, items }
+    })
+    .filter(c => c.label.length > 0)
+}
+
+// ─── Semantic theme matchers ──────────────────────────────────────────────────
+
+/**
+ * Maps each theme label to a set of keyword/phrase matchers.
+ * ANY single match in the search text satisfies the theme.
+ * More lenient than word-by-word matching of the slash-separated label.
+ */
+const THEME_KEYWORD_MATCHERS: Record<string, string[]> = {
+  'UAT / QA collaboration': [
+    'uat', 'user acceptance', 'acceptance testing', 'qa', 'release readiness',
+    'testing considerations', 'validation criteria', 'acceptance path', 'release risk',
+    'defect', 'test plan', 'smoke test', 'quality assurance',
+  ],
+  'product performance / KPI / usage analysis': [
+    'kpi', 'usage', 'adoption', 'pendo', 'analytics', 'data-informed', 'outcome review',
+    'investment decision', 'performance metric', 'dashboard', 'reporting',
+    'signals', 'retention', 'engagement metric', 'product health',
+  ],
+  'documentation / training / stakeholder communication': [
+    'documentation', 'release notes', 'help documentation', 'stakeholder',
+    'business users', 'support teams', 'guidance', 'training', 'walkthrough',
+    'communicate', 'knowledge transfer', 'user guide', 'enablement',
+  ],
+  'backlog ownership / sprint delivery': [
+    'backlog', 'prioriti', 'sprint', 'roadmap', 'grooming', 'refinement',
+    'user stories', 'epics', 'delivery', 'scrum', 'velocity', 'iteration',
+  ],
+  'requirements / acceptance criteria': [
+    'requirements', 'acceptance criteria', 'user stories', 'epics',
+    'business rules', 'use cases', 'specifications', 'acceptance path',
+    'story mapping', 'definition of done', 'business requirements',
+  ],
+  'stakeholder alignment / cross-functional delivery': [
+    'stakeholder', 'cross-functional', 'engineering', 'alignment', 'dependencies',
+    'cross-product', 'product teams', 'go-to-market', 'launch coordination',
+    'partner team', 'delivery coordination',
+  ],
+}
+
+/** Returns true if any keyword for the given theme appears in the search text. */
+function checkThemeInText(theme: string, text: string): boolean {
+  const textLower = text.toLowerCase()
+  const keywords = THEME_KEYWORD_MATCHERS[theme]
+  if (keywords?.length) {
+    return keywords.some(kw => textLower.includes(kw))
+  }
+  // Fallback: original slash-split word-level matching
+  const terms = theme.split('/').map(t => t.trim().toLowerCase())
+  return terms.some(term => term.split(' ').every(word => textLower.includes(word)))
+}
+
+/** Returns up to 3 experience bullets that contain evidence for the given theme. */
+function findMatchingBullets(theme: string, bullets: string[]): string[] {
+  const keywords = THEME_KEYWORD_MATCHERS[theme] ?? []
+  return bullets
+    .filter(b => keywords.some(kw => b.toLowerCase().includes(kw)))
+    .slice(0, 3)
+}
+
+/** Derives a stable camelCase-like ID from a theme label. */
+function themeId(label: string): string {
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
+}
+
 // ─── Summary-vs-Experience de-duplication ────────────────────────────────────
 
 export interface DuplicatedSignal {
@@ -484,13 +572,14 @@ export function validateResumeAgainstContract(
     })
   }
 
-  // Skills row count
-  const skillsRows = countNonEmptyLines(skillsText)
+  // Skills row count — count category rows (lines with "Label: items" format), not raw lines
+  const skillsCategories = parseSkillCategories(skillsText)
+  const skillsRows = skillsCategories.length > 0 ? skillsCategories.length : countNonEmptyLines(skillsText)
   if (skillsRows > contract.sectionPlan.skills.maxRows) {
     violations.push({
       rule: 'skills_max_rows',
       section: 'skills',
-      detail: `Skills has ${skillsRows} rows; max is ${contract.sectionPlan.skills.maxRows}`,
+      detail: `Skills has ${skillsRows} categor${skillsRows === 1 ? 'y' : 'ies'}; max is ${contract.sectionPlan.skills.maxRows}. Compress into fewer category rows.`,
       canAutoRepair: false,
       severity: 'error',
     })
@@ -621,16 +710,39 @@ export function validateResumeAgainstContract(
     })
   }
 
-  // Required JD themes in bullets
-  const searchSpace = (experienceText + ' ' + summaryText).toLowerCase()
+  // Required JD themes in bullets — semantic keyword matching
+  const experienceBulletLines = experienceText
+    .split('\n')
+    .filter(l => l.trim().startsWith('- '))
+    .map(l => l.trim())
+
+  const themeWarnings: ThemeWarning[] = []
   for (const theme of contract.requiredBulletThemes) {
-    const terms = theme.split('/').map(t => t.trim().toLowerCase())
-    const found = terms.some(term => term.split(' ').every(word => searchSpace.includes(word)))
-    if (!found) {
+    const foundInExperience = checkThemeInText(theme, experienceText + ' ' + summaryText)
+    const foundInSkills = checkThemeInText(theme, skillsText)
+    const matchingBullets = findMatchingBullets(theme, experienceBulletLines)
+
+    themeWarnings.push({
+      themeId: themeId(theme),
+      themeLabel: theme,
+      severity: 'warning',
+      foundInSkills,
+      foundInExperience,
+      matchingExperienceBullets: matchingBullets,
+      suggestedAction: foundInExperience
+        ? 'ignore'
+        : foundInSkills
+        ? 'refine_section'
+        : 'add_bridge_question',
+    })
+
+    if (!foundInExperience) {
       violations.push({
-        rule: 'missing_jd_theme',
+        rule: foundInSkills ? 'required_theme_only_in_skills' : 'missing_jd_theme',
         section: 'experience',
-        detail: `Required JD theme not found in resume: "${theme}"`,
+        detail: foundInSkills
+          ? `Theme "${theme}" appears in Skills but lacks proof in Experience bullets — add a grounded bullet.`
+          : `Required JD theme not found in resume: "${theme}". Add evidence to Experience if available.`,
         canAutoRepair: false,
         severity: 'warning',
       })
@@ -642,6 +754,7 @@ export function validateResumeAgainstContract(
     pass: errors.length === 0,
     violations,
     suggestedRepairs: violations.filter(v => v.canAutoRepair).map(v => v.detail),
+    themeWarnings,
   }
 }
 
@@ -689,20 +802,33 @@ export function validateStage4ResumeOutput(
     })
   }
 
-  // 2. Required JD themes that appear only in Skills, not in Experience
-  const experienceLower = experienceText.toLowerCase()
-  const skillsLower = skillsText.toLowerCase()
+  // 2. Required JD themes that appear only in Skills, not in Experience — semantic matching
+  const extraThemeWarnings: ThemeWarning[] = []
+  const experienceBulletsForTheme = experienceText
+    .split('\n')
+    .filter(l => l.trim().startsWith('- '))
+    .map(l => l.trim())
+
   for (const theme of rc.requiredExperienceThemes) {
-    const terms = theme.split('/').map(t => t.trim().toLowerCase())
-    const inExperience = terms.some(term =>
-      term.split(' ').every(word => word.length <= 2 || experienceLower.includes(word)),
-    )
-    const inSkillsOnly =
-      !inExperience &&
-      terms.some(term =>
-        term.split(' ').some(word => word.length > 3 && skillsLower.includes(word)),
-      )
-    if (inSkillsOnly) {
+    // Skip if already covered by the base validator's requiredBulletThemes
+    const alreadyCovered = base.themeWarnings?.some(tw => tw.themeLabel === theme)
+    if (alreadyCovered) continue
+
+    const inExperience = checkThemeInText(theme, experienceText)
+    const inSkills = checkThemeInText(theme, skillsText)
+    const matchingBullets = findMatchingBullets(theme, experienceBulletsForTheme)
+
+    extraThemeWarnings.push({
+      themeId: themeId(theme),
+      themeLabel: theme,
+      severity: 'warning',
+      foundInSkills: inSkills,
+      foundInExperience: inExperience,
+      matchingExperienceBullets: matchingBullets,
+      suggestedAction: inExperience ? 'ignore' : inSkills ? 'refine_section' : 'add_bridge_question',
+    })
+
+    if (inSkills && !inExperience) {
       extraViolations.push({
         rule: 'required_theme_only_in_skills',
         section: 'experience',
@@ -714,11 +840,13 @@ export function validateStage4ResumeOutput(
   }
 
   const allViolations = [...base.violations, ...extraViolations]
+  const allThemeWarnings = [...(base.themeWarnings ?? []), ...extraThemeWarnings]
   const errors = allViolations.filter(v => v.severity === 'error')
   return {
     pass: errors.length === 0,
     violations: allViolations,
     suggestedRepairs: allViolations.filter(v => v.canAutoRepair).map(v => v.detail),
+    themeWarnings: allThemeWarnings,
   }
 }
 

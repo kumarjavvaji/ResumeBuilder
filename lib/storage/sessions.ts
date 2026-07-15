@@ -1,6 +1,7 @@
 import { db } from './db'
 import type { TargetIntake, SessionStageStatuses, StageKey, FitAnalysis } from '@/contracts'
 import { deriveStageStatuses } from '@/contracts'
+import type { Stage1PipelineResult } from '@/lib/llm/stage1/pipeline'
 
 export async function saveSession(session: TargetIntake): Promise<void> {
   // Ensure stageStatuses is always present
@@ -57,6 +58,33 @@ export async function updateFitAnalysis(
   fitAnalysis: FitAnalysis
 ): Promise<void> {
   await db.sessions.update(id, { fitAnalysis, updatedAt: new Date().toISOString() })
+}
+
+export async function updateSessionFromStage1Artifact(
+  sessionId: string,
+  artifact: Stage1PipelineResult,
+  stage1JobId?: string,
+): Promise<void> {
+  await db.sessions.update(sessionId, {
+    stage1Status: 'complete',
+    domainIQInsights: artifact.domainIQ,
+    jobDescription: artifact.rawJD,
+    jdRequirementMap: artifact.requirementMap,
+    companySummary: artifact.synthesis.companySummary,
+    fitHypothesis: artifact.synthesis.fitHypothesis,
+    riskGaps: artifact.synthesis.riskGaps,
+    emphasisRecommendation: artifact.synthesis.emphasisRecommendation,
+    fitAnalysis: artifact.fitAnalysis,
+    ...(stage1JobId ? { stage1JobId } : {}),
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+export async function updateSessionStage1Job(
+  sessionId: string,
+  stage1JobId: string,
+): Promise<void> {
+  await db.sessions.update(sessionId, { stage1JobId, updatedAt: new Date().toISOString() })
 }
 
 export async function updateOverallRefinementPrompt(

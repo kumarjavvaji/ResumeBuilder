@@ -17,6 +17,7 @@ import type {
   AppliedCalibrationState,
   ProfileSnapshot,
   Stage1Job,
+  NormalizedLearning,
 } from '@/contracts'
 import { deriveStageStatuses } from '@/contracts'
 import { migrateToSkillGroups } from '@/lib/skills/classify'
@@ -39,6 +40,7 @@ export class ResumeBuilderDB extends Dexie {
   appliedCalibrationStates!: Table<AppliedCalibrationState>
   profileSnapshots!: Table<ProfileSnapshot>
   stage1Jobs!: Table<Stage1Job>
+  normalizedLearnings!: Table<NormalizedLearning>
 
   constructor() {
     super('resume-builder')
@@ -126,6 +128,16 @@ export class ResumeBuilderDB extends Dexie {
     // v11: adds stage1Jobs table for persisted multi-pass Stage 1 execution.
     this.version(11).stores({
       stage1Jobs: 'id, status, createdAt',
+    })
+
+    // v12: adds stage1JobId + jdHash indexes to bridgeQuestions for provenance queries and staleness checks.
+    this.version(12).stores({
+      bridgeQuestions: 'id, sessionId, stage1JobId, jdHash, type, priority, status',
+    })
+
+    // v13: adds normalizedLearnings table for bucket-classified learning records.
+    this.version(13).stores({
+      normalizedLearnings: 'id, bucket, scope, sourceSessionId, roleFamily, savedAt'
     })
 
     // v10: adds artifactHistory table for accepted/rejected resume content.

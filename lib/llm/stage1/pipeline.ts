@@ -21,6 +21,7 @@ import { parseDomainIQ } from '@/lib/llm/parse-domainiq'
 import { generateIntakeSynthesis } from '@/lib/llm/generate-intake'
 import { deriveStage1Findings } from '@/lib/stage1/source-trace'
 import { extractCompanyIndustryBasisFromDomainIQText, buildCalibrationBrief } from '@/lib/stage1/calibration-brief'
+import { requirementTextToId } from '@/lib/llm/jd-hash'
 import type {
   CandidateProfileMap,
   ValidatedProfileClaims,
@@ -726,7 +727,23 @@ export async function runPassE(
     maxTokens: 3500,
     validate: (i) => Array.isArray(i?.directlySupported) && Array.isArray(i?.trueGaps),
   })
-  return output
+  return enrichGapFitWithIds(output)
+}
+
+/**
+ * Assigns deterministic requirementIds to every GapFitEntry after Pass E.
+ * IDs are derived from requirementText — no LLM changes needed.
+ */
+function enrichGapFitWithIds(analysis: GapFitAnalysis): GapFitAnalysis {
+  const tag = (entries: GapFitEntry[]) =>
+    entries.map(e => ({ ...e, requirementId: e.requirementId || requirementTextToId(e.requirementText) }))
+  return {
+    directlySupported: tag(analysis.directlySupported),
+    weaklySupported: tag(analysis.weaklySupported),
+    resumeGaps: tag(analysis.resumeGaps),
+    trueGaps: tag(analysis.trueGaps),
+    doNotClaim: tag(analysis.doNotClaim),
+  }
 }
 
 // ─── Pass F: Bridge Question Generation ──────────────────────────────────────
@@ -762,8 +779,9 @@ const PASS_F_TOOL = {
         maxItems: 8,
         items: {
           type: 'object',
-          required: ['requirement', 'currentClassification', 'whyEvidenceIsMissing', 'potentialResumeImpact', 'question', 'priority', 'affectedSection'],
+          required: ['requirementId', 'requirement', 'currentClassification', 'whyEvidenceIsMissing', 'potentialResumeImpact', 'question', 'priority', 'affectedSection', 'evidenceStatus'],
           properties: {
+            requirementId: { type: 'string', description: 'Echo the requirementId from the eligible requirement entry.' },
             requirement: { type: 'string' },
             currentClassification: { type: 'string', enum: ['weakly_supported', 'true_gap'] },
             whyEvidenceIsMissing: { type: 'string', maxLength: 80 },
@@ -771,6 +789,7 @@ const PASS_F_TOOL = {
             question: { type: 'string', description: '≤35 words. Specific, concrete question targeting the missing element.' },
             priority: { type: 'string', enum: ['high', 'medium', 'low'] },
             affectedSection: { type: 'string', enum: ['summary', 'skills', 'experience-primary', 'experience-secondary', 'experience-supporting'] },
+            evidenceStatus: { type: 'string', enum: ['partial', 'weak', 'gap', 'retrieval_gap'], description: 'Coverage state that motivated this question.' },
           },
         },
       },
@@ -782,6 +801,7 @@ export async function runPassF(
   gapAnalysis: GapFitAnalysis,
   validatedClaims: ValidatedProfileClaims,
 ): Promise<Stage2QuestionCandidate[]> {
+  // gapAnalysis already has requirementIds assigned by enrichGapFitWithIds after Pass E
   const eligibleRequirements = [
     ...gapAnalysis.weaklySupported.map(e => ({ ...e, fromCategory: 'weakly_supported' as const })),
     ...gapAnalysis.trueGaps.map(e => ({ ...e, fromCategory: 'true_gap' as const })),
@@ -807,8 +827,16 @@ export async function runPassF(
     maxTokens: 2500,
     validate: (i) => Array.isArray(i?.questions),
   })
+  // Ensure every candidate has requirementId and evidenceStatus (echo from eligible requirements if LLM omitted)
+  const requirementIdByText = new Map(eligibleRequirements.map(e => [e.requirementText, e.requirementId]))
+  const categoryByText = new Map(eligibleRequirements.map(e => [e.requirementText, e.fromCategory]))
+  const enriched = output.questions.map(q => ({
+    ...q,
+    requirementId: q.requirementId || requirementIdByText.get(q.requirement) || requirementTextToId(q.requirement),
+    evidenceStatus: q.evidenceStatus || (categoryByText.get(q.requirement) === 'true_gap' ? 'gap' as const : 'weak' as const),
+  }))
 
-  return output.questions
+  return enriched
 }
 
 // ─── Output assembly — converts pipeline results to existing contract types ───

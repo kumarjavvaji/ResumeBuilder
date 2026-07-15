@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 
 import { useEffect, useMemo, useState } from 'react'
 import type {
@@ -10,8 +10,10 @@ import type {
   ResumeGenerationContract,
   ResumeReadinessContract,
   ResumeStrategyBrief,
+  SectionWarning,
   Stage4QualityTrace,
   Stage4RawResumeText,
+  Stage4Section,
   TargetIntake,
   UserProfile,
 } from '@/contracts'
@@ -30,16 +32,24 @@ import {
   saveStage4RawResumeText,
   updateStage4RawResumeText,
   updateStage4RawResumeTextSections,
-  saveStage4FullRefinement,
-  acceptStage4FullRefinement,
-  rejectStage4FullRefinement,
-  saveStage4SectionRefinement,
-  acceptStage4SectionRefinement,
-  rejectStage4SectionRefinement,
+  updateStage4SectionBlock,
+  acceptStage4SectionProposal,
+  rejectStage4SectionProposal,
+  setStage4SectionManualEdit,
+  ignoreStage4SectionWarning,
+  unignoreStage4SectionWarning,
 } from '@/lib/storage/stage4-raw-resume'
 import {
+  generateAllSectionWarnings,
+  summarizeWarnings,
+  SECTION_WARNING_LABELS,
+  SECTION_WARNING_SEVERITY_COLOR,
+  SUGGESTED_ACTION_LABELS,
+} from '@/lib/stage4/section-warnings'
+import {
+  buildSectionBlocks,
   buildStage4RawResumeText,
-  formatExperienceBlock,
+  compiledFullText,
   getStage4Readiness,
   getStage4StaleReasons,
   parseSectionsFromRepairedText,
@@ -51,19 +61,20 @@ import {
 import { buildResumeReadinessContract } from '@/lib/stage3/readiness-contract'
 import { buildResumeStrategyBrief } from '@/lib/resume-strategy/resume-strategy-brief'
 import { Spinner } from '@/components/shared/spinner'
-import { inputCls, textareaCls } from '@/lib/input-cls'
+import { textareaCls } from '@/lib/input-cls'
 
 const REQUIRED_LABELS: Record<string, string> = {
-  summary: 'Professional Summary',
+  summary: 'Summary',
   skills: 'Skills',
-  'experience-primary': 'Experience: Product Owner',
-  'experience-secondary': 'Experience: Business Analyst',
-  'experience-supporting': 'Experience: QA / Quality',
+  'experience-primary': 'Primary Experience',
+  'experience-secondary': 'Secondary Experience',
+  'experience-supporting': 'Supporting Experience',
 }
 
-// Keys that appear in sectionRefinements; 'education' is profile-assembled (not an ArtifactSection type)
-const REFINEABLE_SECTION_KEYS = ['summary', 'skills', 'experience-primary', 'experience-secondary', 'experience-supporting', 'education'] as const
-type RefineKey = typeof REFINEABLE_SECTION_KEYS[number]
+const SECTION_DISPLAY: Record<string, string> = {
+  ...REQUIRED_LABELS,
+  education: 'Education & Certifications',
+}
 
 // ─── Context for LLM refinement calls ────────────────────────────────────────
 
@@ -85,76 +96,11 @@ interface RepairPreview {
   changed: boolean
 }
 
-// ─── Helper: text for a given section key ────────────────────────────────────
+// ─── Derive section blocks from rawText ──────────────────────────────────────
 
-function getSectionTextForKey(
-  rawText: Stage4RawResumeText,
-  sectionKey: RefineKey,
-  artifactSections: ArtifactSection[]
-): string {
-  if (sectionKey === 'summary') return rawText.sections.summary
-  if (sectionKey === 'skills') return rawText.sections.skills
-  if (sectionKey === 'education') return rawText.sections.education
-  // Experience — find blocks whose sourceArtifactSectionId matches the section of this type
-  const sourceSection = artifactSections.find(s => s.type === sectionKey)
-  if (!sourceSection) return ''
-  const blocks = rawText.sections.experiences.filter(b => b.sourceArtifactSectionId === sourceSection.id)
-  return blocks.map(formatExperienceBlock).join('\n\n')
-}
-
-// ─── Helper: resolve copy text respecting accepted refinements ─────────────────
-
-function effectiveSectionText(
-  rawText: Stage4RawResumeText,
-  sectionKey: RefineKey,
-  artifactSections: ArtifactSection[]
-): string {
-  const ref = rawText.sectionRefinements?.[sectionKey]
-  if (ref?.accepted) return ref.output
-  return getSectionTextForKey(rawText, sectionKey, artifactSections)
-}
-
-function effectiveFullText(rawText: Stage4RawResumeText, artifactSections: ArtifactSection[]): string {
-  if (rawText.refinementAccepted && rawText.refinementOutput) return rawText.refinementOutput
-
-  const anySectionRefined = REFINEABLE_SECTION_KEYS.some(
-    k => rawText.sectionRefinements?.[k]?.accepted
-  )
-  if (!anySectionRefined) return rawText.sections.fullText
-
-  // Re-assemble full text from per-section accepted refinements
-  const summary = effectiveSectionText(rawText, 'summary', artifactSections)
-  const skills = effectiveSectionText(rawText, 'skills', artifactSections)
-  const education = effectiveSectionText(rawText, 'education', artifactSections)
-
-  // For experience: per-type accepted refinements replace entire type; original blocks fill the rest
-  const poRef = rawText.sectionRefinements?.['experience-primary']
-  const baRef = rawText.sectionRefinements?.['experience-secondary']
-  const qaRef = rawText.sectionRefinements?.['experience-supporting']
-
-  const poSection = artifactSections.find(s => s.type === 'experience-primary')
-  const baSection = artifactSections.find(s => s.type === 'experience-secondary')
-  const qaSection = artifactSections.find(s => s.type === 'experience-supporting')
-
-  const experienceChunks: string[] = []
-  for (const block of rawText.sections.experiences) {
-    if (poRef?.accepted && poSection && block.sourceArtifactSectionId === poSection.id) continue
-    if (baRef?.accepted && baSection && block.sourceArtifactSectionId === baSection.id) continue
-    if (qaRef?.accepted && qaSection && block.sourceArtifactSectionId === qaSection.id) continue
-    experienceChunks.push(formatExperienceBlock(block))
-  }
-  if (poRef?.accepted) experienceChunks.unshift(poRef.output)
-  if (baRef?.accepted) experienceChunks.push(baRef.output)
-  if (qaRef?.accepted) experienceChunks.push(qaRef.output)
-
-  const experienceText = experienceChunks.filter(Boolean).join('\n\n')
-
-  return [
-    summary ? `SUMMARY\n${summary}` : '',
-    skills ? `SKILLS\n${skills}` : '',
-    experienceText ? `EXPERIENCE\n${experienceText}` : '',
-    education ? `EDUCATION\n${education}` : '',
-  ].filter(Boolean).join('\n\n')
+function deriveBlocks(rawText: Stage4RawResumeText, artifactSections: ArtifactSection[]): Stage4Section[] {
+  if (rawText.sectionBlocks?.length) return rawText.sectionBlocks
+  return buildSectionBlocks(rawText.sections, artifactSections)
 }
 
 // ─── Main page component ──────────────────────────────────────────────────────
@@ -167,11 +113,14 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [repairing, setRepairing] = useState(false)
-  const [copiedKey, setCopiedKey] = useState<string | null>(null)
+  const [fullRefining, setFullRefining] = useState(false)
+  const [copiedFull, setCopiedFull] = useState(false)
   const [error, setError] = useState('')
   const [validation, setValidation] = useState<ContractValidationResult | undefined>(undefined)
   const [repairPreview, setRepairPreview] = useState<RepairPreview | undefined>(undefined)
   const [showDebugTrace, setShowDebugTrace] = useState(false)
+  const [fullRefineInstruction, setFullRefineInstruction] = useState('')
+  const [showFullRefine, setShowFullRefine] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -214,7 +163,6 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
   const readiness = useMemo(() => getStage4Readiness(sections), [sections])
   const staleReasons = useMemo(() => getStage4StaleReasons(rawText, sections), [rawText, sections])
 
-  // Derived deterministically — re-computed if session or profile changes
   const contract = useMemo<ResumeGenerationContract | undefined>(() => {
     if (!refineCtx || !profile) return undefined
     return buildResumeGenerationContract({
@@ -247,14 +195,24 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
     })
   }, [contract, refineCtx])
 
-  function validateStage4Text(text: string): ContractValidationResult | undefined {
-    if (!contract || !profile) return undefined
-    const knownTools = [...profile.skills, ...profile.skillGroups.flatMap(g => g.skills)]
-    return validateStage4ResumeOutput(text, contract, {
-      knownTools,
-      readinessContract,
-    })
-  }
+  // Derived section blocks — stable across renders
+  const sectionBlocks = useMemo<Stage4Section[]>(
+    () => rawText ? deriveBlocks(rawText, sections) : [],
+    [rawText, sections],
+  )
+
+  const compiledText = useMemo(() => compiledFullText(sectionBlocks), [sectionBlocks])
+
+  // Section-level warnings — regenerated whenever blocks change
+  const warningMap = useMemo(() => generateAllSectionWarnings(sectionBlocks), [sectionBlocks])
+  const warningSummary = useMemo(() => {
+    const ignoredBySection: Record<string, string[]> = {}
+    for (const b of sectionBlocks) {
+      if (b.ignoredWarningIds?.length) ignoredBySection[b.sectionId] = b.ignoredWarningIds
+    }
+    return summarizeWarnings(warningMap, ignoredBySection)
+  }, [warningMap, sectionBlocks])
+
   const displayRaw = rawText
     ? {
         ...rawText,
@@ -262,6 +220,12 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
         staleReasons: staleReasons.length > 0 ? staleReasons : rawText.staleReasons,
       }
     : undefined
+
+  function validateText(text: string): ContractValidationResult | undefined {
+    if (!contract || !profile) return undefined
+    const knownTools = [...profile.skills, ...profile.skillGroups.flatMap(g => g.skills)]
+    return validateStage4ResumeOutput(text, contract, { knownTools, readinessContract })
+  }
 
   async function generate(allowDraft: boolean) {
     if (!profile) {
@@ -285,7 +249,7 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
       })
       const saved = await saveStage4RawResumeText(assembled)
       setRawText(saved)
-      const result = validateStage4Text(assembled.sections.fullText)
+      const result = validateText(assembled.sections.fullText)
       setValidation(result)
       if (result && !result.pass) {
         await runAutoRepair(saved, result)
@@ -306,8 +270,8 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
     setRepairing(true)
     setError('')
     try {
-      const currentText = effectiveFullText(targetRawText, sections)
-      const currentValidation = validationOverride ?? validateStage4Text(currentText)
+      const currentText = compiledFullText(deriveBlocks(targetRawText, sections))
+      const currentValidation = validationOverride ?? validateText(currentText)
       const violations = currentValidation?.violations ?? []
       const res = await fetch('/api/stage4-repair', {
         method: 'POST',
@@ -347,18 +311,11 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
         return
       }
 
-      // Auto-repair output has already passed validation. Store the repaired text
-      // back into sections.* so section cards stay in sync. Never write into
-      // refinementOutput — that field is only for explicit user refinement flows.
-      const currentSections = (rawOverride ?? rawText)?.sections
-      if (currentSections) {
-        const patchedSections = parseSectionsFromRepairedText(result.repairedText, currentSections)
-        const updated = await updateStage4RawResumeTextSections(sessionId, patchedSections)
-        if (updated) setRawText(updated)
-      } else {
-        const updated = await getStage4RawResumeText(sessionId)
-        if (updated) setRawText(updated)
-      }
+      const currentSections = targetRawText.sections
+      const patchedSections = parseSectionsFromRepairedText(result.repairedText, currentSections)
+      const newBlocks = buildSectionBlocks(patchedSections, sections)
+      const updated = await updateStage4RawResumeTextSections(sessionId, patchedSections, newBlocks)
+      if (updated) setRawText(updated)
       setValidation(result.remainingValidation)
       setRepairPreview(undefined)
     } catch (err) {
@@ -375,88 +332,93 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
   }
 
   async function acceptPartialRepair() {
-    if (!repairPreview) return
-    // Store repaired text into sections.* — never into refinementOutput.
-    const currentSections = rawText?.sections
-    if (currentSections) {
-      const patchedSections = parseSectionsFromRepairedText(repairPreview.repairedText, currentSections)
-      const updated = await updateStage4RawResumeTextSections(sessionId, patchedSections)
-      if (updated) setRawText(updated)
-    }
+    if (!repairPreview || !rawText) return
+    const patchedSections = parseSectionsFromRepairedText(repairPreview.repairedText, rawText.sections)
+    const newBlocks = buildSectionBlocks(patchedSections, sections)
+    const updated = await updateStage4RawResumeTextSections(sessionId, patchedSections, newBlocks)
+    if (updated) setRawText(updated)
     setValidation(repairPreview.validation)
     setRepairPreview(undefined)
   }
 
-  async function copyText(key: string, text: string) {
-    await navigator.clipboard.writeText(text)
-    setCopiedKey(key)
-    setTimeout(() => setCopiedKey(null), 1600)
+  async function copyFull() {
+    await navigator.clipboard.writeText(compiledText)
+    setCopiedFull(true)
+    setTimeout(() => setCopiedFull(false), 1600)
   }
 
-  // ── Refinement handlers ───────────────────────────────────────────────────
+  // ── Full-resume refinement (returns section-level proposals) ──────────────
 
-  async function runFullRefinement(instruction: string) {
-    if (!refineCtx || !rawText) return null
-    const text = effectiveFullText(rawText, sections)
-    const res = await fetch('/api/stage4-refine', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        mode: 'full',
-        sessionId,
-        fullResumeText: text,
-        userInstruction: instruction,
-        jdMap: refineCtx.session.jdRequirementMap,
-        profile: refineCtx.profile,
-        answeredQuestions: refineCtx.bridgeQuestions,
-        emphasis: refineCtx.session.emphasisRecommendation,
-        companySummary: refineCtx.session.companySummary,
-        fitHypothesis: refineCtx.session.fitHypothesis,
-        riskGaps: refineCtx.session.riskGaps,
-        acceptedSignals: refineCtx.acceptedSignals,
-        globalSignals: refineCtx.globalSignals,
-        rejectedPhrases: refineCtx.rejectedPhrases,
-        calibrationSummary: refineCtx.calibrationSummary,
-        roleTitle: refineCtx.session.roleTitle,
-        company: refineCtx.session.company,
-        contract,
-        strategyBrief,
-      }),
-    })
-    if (!res.ok) {
-      const err = await res.json()
-      throw new Error(err.error ?? 'Full resume refinement failed.')
+  async function runFullRefinement() {
+    if (!refineCtx || !rawText || !fullRefineInstruction.trim()) return
+    setFullRefining(true)
+    setError('')
+    try {
+      const res = await fetch('/api/stage4-refine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'full',
+          sessionId,
+          fullResumeText: compiledText,
+          userInstruction: fullRefineInstruction.trim(),
+          jdMap: refineCtx.session.jdRequirementMap,
+          profile: refineCtx.profile,
+          answeredQuestions: refineCtx.bridgeQuestions,
+          emphasis: refineCtx.session.emphasisRecommendation,
+          companySummary: refineCtx.session.companySummary,
+          fitHypothesis: refineCtx.session.fitHypothesis,
+          riskGaps: refineCtx.session.riskGaps,
+          acceptedSignals: refineCtx.acceptedSignals,
+          globalSignals: refineCtx.globalSignals,
+          rejectedPhrases: refineCtx.rejectedPhrases,
+          calibrationSummary: refineCtx.calibrationSummary,
+          roleTitle: refineCtx.session.roleTitle,
+          company: refineCtx.session.company,
+          contract,
+          strategyBrief,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error ?? 'Full resume refinement failed.')
+      }
+      const { revisedText } = await res.json() as { revisedText: string; changeSummary: string[]; warnings: string[] }
+
+      // Parse revised text into sections and set proposedText per block
+      const parsedSections = parseSectionsFromRepairedText(revisedText, rawText.sections)
+      const newBlocks = buildSectionBlocks(parsedSections, sections)
+      const currentBlockMap = new Map(sectionBlocks.map(b => [b.sectionId, b]))
+      for (const nb of newBlocks) {
+        const current = currentBlockMap.get(nb.sectionId)
+        if (current && nb.acceptedText.trim() !== current.acceptedText.trim()) {
+          await updateStage4SectionBlock(sessionId, nb.sectionId, nb.acceptedText)
+        }
+      }
+      const updated = await getStage4RawResumeText(sessionId)
+      if (updated) setRawText(updated)
+      setShowFullRefine(false)
+      setFullRefineInstruction('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Full resume refinement failed.')
+    } finally {
+      setFullRefining(false)
     }
-    const result = await res.json() as { revisedText: string; changeSummary: string[]; warnings: string[] }
-    await saveStage4FullRefinement(sessionId, instruction, result.revisedText)
-    const updated = await getStage4RawResumeText(sessionId)
-    if (updated) setRawText(updated)
-    return result
   }
 
-  async function handleAcceptFullRefinement() {
-    await acceptStage4FullRefinement(sessionId)
-    const updated = await getStage4RawResumeText(sessionId)
-    if (updated) setRawText(updated)
-  }
+  // ── Per-section handlers ──────────────────────────────────────────────────
 
-  async function handleRejectFullRefinement() {
-    await rejectStage4FullRefinement(sessionId)
-    const updated = await getStage4RawResumeText(sessionId)
-    if (updated) setRawText(updated)
-  }
-
-  async function runSectionRefinement(sectionKey: RefineKey, instruction: string) {
-    if (!refineCtx || !rawText) return null
-    const sectionText = getSectionTextForKey(rawText, sectionKey, sections)
+  async function handleSectionRefine(sectionId: string, instruction: string) {
+    if (!refineCtx || !rawText) return
+    const block = sectionBlocks.find(b => b.sectionId === sectionId)
     const res = await fetch('/api/stage4-refine', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         mode: 'section',
         sessionId,
-        sectionType: sectionKey === 'education' ? 'summary' : sectionKey,
-        sectionText,
+        sectionType: sectionId,
+        sectionText: block?.acceptedText ?? '',
         userInstruction: instruction,
         jdMap: refineCtx.session.jdRequirementMap,
         profile: refineCtx.profile,
@@ -479,21 +441,38 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
       const err = await res.json()
       throw new Error(err.error ?? 'Section refinement failed.')
     }
-    const result = await res.json() as { revisedText: string; changeSummary: string[]; warnings: string[] }
-    await saveStage4SectionRefinement(sessionId, sectionKey, instruction, result.revisedText)
-    const updated = await getStage4RawResumeText(sessionId)
-    if (updated) setRawText(updated)
-    return result
-  }
-
-  async function handleAcceptSectionRefinement(sectionKey: RefineKey) {
-    await acceptStage4SectionRefinement(sessionId, sectionKey)
+    const { revisedText } = await res.json() as { revisedText: string }
+    await updateStage4SectionBlock(sessionId, sectionId, revisedText)
     const updated = await getStage4RawResumeText(sessionId)
     if (updated) setRawText(updated)
   }
 
-  async function handleRejectSectionRefinement(sectionKey: RefineKey) {
-    await rejectStage4SectionRefinement(sessionId, sectionKey)
+  async function handleSectionAccept(sectionId: string) {
+    await acceptStage4SectionProposal(sessionId, sectionId)
+    const updated = await getStage4RawResumeText(sessionId)
+    if (updated) setRawText(updated)
+  }
+
+  async function handleSectionReject(sectionId: string) {
+    await rejectStage4SectionProposal(sessionId, sectionId)
+    const updated = await getStage4RawResumeText(sessionId)
+    if (updated) setRawText(updated)
+  }
+
+  async function handleSectionManualEdit(sectionId: string, text: string) {
+    await setStage4SectionManualEdit(sessionId, sectionId, text)
+    const updated = await getStage4RawResumeText(sessionId)
+    if (updated) setRawText(updated)
+  }
+
+  async function handleIgnoreWarning(sectionId: string, warningId: string) {
+    await ignoreStage4SectionWarning(sessionId, sectionId, warningId)
+    const updated = await getStage4RawResumeText(sessionId)
+    if (updated) setRawText(updated)
+  }
+
+  async function handleUnignoreWarning(sectionId: string, warningId: string) {
+    await unignoreStage4SectionWarning(sessionId, sectionId, warningId)
     const updated = await getStage4RawResumeText(sessionId)
     if (updated) setRawText(updated)
   }
@@ -507,7 +486,7 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
       <div>
         <h1 className="text-xl font-bold text-white">Stage 4 - Raw Resume Text</h1>
         <p className="text-sm text-gray-400 mt-1">
-          Copyable plain-text resume sections assembled from reviewed Stage 3 artifacts.
+          Plain-text resume assembled from accepted Stage 3 artifacts. Each section is independently refinable.
         </p>
       </div>
 
@@ -537,7 +516,7 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
             disabled={generating}
             className="px-4 py-2 bg-gray-200 text-gray-900 rounded text-sm font-medium hover:bg-white disabled:opacity-50"
           >
-            {generating ? 'Generating...' : displayRaw ? 'Regenerate Raw Text' : 'Generate Raw Resume Text'}
+            {generating ? 'Generating...' : displayRaw ? 'Regenerate' : 'Generate Raw Resume Text'}
           </button>
           <span className="text-xs text-gray-500">No DOCX or PDF is generated in this pass.</span>
         </div>
@@ -554,17 +533,13 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
           validation={validation}
           repairing={repairing}
           onRepair={() => runAutoRepair()}
-          hasSemanticErrors={validation.violations.some(
-            v => !v.canAutoRepair && v.severity === 'error'
-          )}
+          hasSemanticErrors={validation.violations.some(v => !v.canAutoRepair && v.severity === 'error')}
         />
       )}
 
       {repairPreview && displayRaw && (
         <RepairPreviewPanel
           preview={repairPreview}
-          copied={copiedKey === 'repair-preview'}
-          onCopy={() => copyText('repair-preview', repairPreview.repairedText)}
           onAccept={acceptPartialRepair}
         />
       )}
@@ -574,6 +549,7 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
           trace={displayRaw.qualityTrace}
           open={showDebugTrace}
           onToggle={() => setShowDebugTrace(v => !v)}
+          warningSummary={warningSummary}
         />
       )}
 
@@ -589,7 +565,7 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
               disabled={!readiness.ready || generating}
               className="px-3 py-1.5 border border-amber-700 text-amber-100 rounded text-xs hover:bg-amber-900/40 disabled:opacity-50"
             >
-              Regenerate Raw Text
+              Regenerate
             </button>
             <button
               onClick={acknowledgeStale}
@@ -602,87 +578,121 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
       )}
 
       {displayRaw && (
-        <div className="space-y-6">
+        <div className="space-y-4">
           {displayRaw.status === 'needs_review' && (
             <p className="text-xs text-amber-400">
-              Draft preview only. Do not treat this as final or export-ready until all required Stage 3
-              sections are accepted.
+              Draft preview only — not export-ready until all required Stage 3 sections are accepted.
             </p>
           )}
 
-          {/* ── Full resume refinement ── */}
+          {/* ── Full-resume refine bar ── */}
           {canRefine && (
-            <FullRefinementPanel
-              rawText={displayRaw}
-              onRefine={runFullRefinement}
-              onAccept={handleAcceptFullRefinement}
-              onReject={handleRejectFullRefinement}
-              onCopy={text => copyText('full-refined', text)}
-              copied={copiedKey === 'full-refined'}
-            />
+            <div className="border border-gray-700 rounded-lg overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setShowFullRefine(v => !v)}
+                className="w-full flex items-center justify-between px-4 py-2.5 bg-gray-800/60 hover:bg-gray-800/90 text-left text-sm"
+              >
+                <span className="text-gray-300 font-medium">Refine Full Resume</span>
+                <span className="text-gray-500 text-xs">{showFullRefine ? '▲' : '▼'}</span>
+              </button>
+              {showFullRefine && (
+                <div className="px-4 py-3 bg-gray-900/40 space-y-2">
+                  <p className="text-xs text-gray-400">
+                    Apply one instruction across the entire resume. Changes appear as section-level proposals you can Accept or Reject independently.
+                  </p>
+                  <textarea
+                    className={`${textareaCls} h-16 text-xs`}
+                    value={fullRefineInstruction}
+                    onChange={e => setFullRefineInstruction(e.target.value)}
+                    placeholder='e.g. "Tighten to two pages" or "Lead with fintech" or "Remove Azure DevOps"'
+                    disabled={fullRefining}
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={runFullRefinement}
+                      disabled={!fullRefineInstruction.trim() || fullRefining}
+                      className="px-3 py-1.5 bg-gray-700 text-white rounded text-xs font-medium hover:bg-gray-600 disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      {fullRefining && <Spinner className="text-white" />}
+                      {fullRefining ? 'Refining…' : 'Apply'}
+                    </button>
+                    <button
+                      onClick={() => { setShowFullRefine(false); setFullRefineInstruction('') }}
+                      className="text-xs text-gray-500 hover:text-gray-300"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
-          {/* ── Summary ── */}
-          <RefinableTextBlock
-            sectionKey="summary"
-            title="Summary"
-            text={effectiveSectionText(displayRaw, 'summary', sections)}
-            rawText={displayRaw}
-            canRefine={canRefine}
-            copied={copiedKey === 'summary'}
-            onCopy={text => copyText('summary', text)}
-            onRefine={inst => runSectionRefinement('summary', inst)}
-            onAccept={() => handleAcceptSectionRefinement('summary')}
-            onReject={() => handleRejectSectionRefinement('summary')}
-          />
+          {/* ── Warning summary ── */}
+          {sectionBlocks.length > 0 && (warningSummary.errorCount + warningSummary.warningCount + warningSummary.advisoryCount) > 0 && (
+            <div className="flex items-center gap-3 px-3 py-2 bg-gray-800/40 border border-gray-700/50 rounded-lg text-xs">
+              <span className="text-gray-400 font-medium">Section warnings:</span>
+              {warningSummary.errorCount > 0 && (
+                <span className="px-2 py-0.5 rounded bg-red-900/40 text-red-300">
+                  {warningSummary.errorCount} error{warningSummary.errorCount !== 1 ? 's' : ''}
+                </span>
+              )}
+              {warningSummary.warningCount > 0 && (
+                <span className="px-2 py-0.5 rounded bg-amber-900/30 text-amber-300">
+                  {warningSummary.warningCount} warning{warningSummary.warningCount !== 1 ? 's' : ''}
+                </span>
+              )}
+              {warningSummary.advisoryCount > 0 && (
+                <span className="px-2 py-0.5 rounded bg-blue-900/20 text-blue-400">
+                  {warningSummary.advisoryCount} advisory
+                </span>
+              )}
+              {(warningSummary.byType.role_boundary_leakage ?? 0) > 0 && (
+                <span className="text-gray-500">· {warningSummary.byType.role_boundary_leakage} boundary</span>
+              )}
+              {(warningSummary.byType.duplicate_evidence ?? 0) > 0 && (
+                <span className="text-gray-500">· {warningSummary.byType.duplicate_evidence} duplicate</span>
+              )}
+            </div>
+          )}
 
-          {/* ── Skills ── */}
-          <RefinableTextBlock
-            sectionKey="skills"
-            title="Skills"
-            text={effectiveSectionText(displayRaw, 'skills', sections)}
-            rawText={displayRaw}
-            canRefine={canRefine}
-            copied={copiedKey === 'skills'}
-            onCopy={text => copyText('skills', text)}
-            onRefine={inst => runSectionRefinement('skills', inst)}
-            onAccept={() => handleAcceptSectionRefinement('skills')}
-            onReject={() => handleRejectSectionRefinement('skills')}
-          />
+          {/* ── Document spine ── */}
+          {sectionBlocks.length > 0 && (
+            <div className="space-y-3">
+              {[...sectionBlocks].sort((a, b) => a.order - b.order).map(block => (
+                <SectionCard
+                  key={block.sectionId}
+                  block={block}
+                  sectionWarnings={warningMap.get(block.sectionId) ?? []}
+                  canRefine={canRefine}
+                  onRefine={inst => handleSectionRefine(block.sectionId, inst)}
+                  onAccept={() => handleSectionAccept(block.sectionId)}
+                  onReject={() => handleSectionReject(block.sectionId)}
+                  onManualEdit={text => handleSectionManualEdit(block.sectionId, text)}
+                  onIgnoreWarning={id => handleIgnoreWarning(block.sectionId, id)}
+                  onUnignoreWarning={id => handleUnignoreWarning(block.sectionId, id)}
+                />
+              ))}
+            </div>
+          )}
 
-          {/* ── Experience (grouped by section type) ── */}
-          <ExperienceSections
-            rawText={displayRaw}
-            artifactSections={sections}
-            canRefine={canRefine}
-            copiedKey={copiedKey}
-            onCopy={copyText}
-            onRefine={(key, inst) => runSectionRefinement(key as RefineKey, inst)}
-            onAccept={key => handleAcceptSectionRefinement(key as RefineKey)}
-            onReject={key => handleRejectSectionRefinement(key as RefineKey)}
-          />
-
-          {/* ── Education ── */}
-          <RefinableTextBlock
-            sectionKey="education"
-            title="Education & Certifications"
-            text={effectiveSectionText(displayRaw, 'education', sections)}
-            rawText={displayRaw}
-            canRefine={canRefine}
-            copied={copiedKey === 'education'}
-            onCopy={text => copyText('education', text)}
-            onRefine={inst => runSectionRefinement('education', inst)}
-            onAccept={() => handleAcceptSectionRefinement('education')}
-            onReject={() => handleRejectSectionRefinement('education')}
-          />
-
-          {/* ── Full text copy ── */}
-          <TextBlock
-            title="Full Resume Text"
-            text={effectiveFullText(displayRaw, sections)}
-            copied={copiedKey === 'full'}
-            onCopy={() => copyText('full', effectiveFullText(displayRaw, sections))}
-          />
+          {/* ── Copy full resume action bar ── */}
+          {sectionBlocks.length > 0 && (
+            <div className="flex items-center justify-between border border-gray-700 rounded-lg px-4 py-3 bg-gray-900/40">
+              <div>
+                <p className="text-sm font-medium text-gray-200">Full Resume</p>
+                <p className="text-xs text-gray-500">Compiled from accepted section text in document order.</p>
+              </div>
+              <button
+                onClick={copyFull}
+                disabled={!compiledText.trim()}
+                className="px-4 py-2 border border-gray-600 text-gray-300 rounded text-sm hover:border-gray-400 hover:text-white disabled:opacity-40"
+              >
+                {copiedFull ? 'Copied' : 'Copy Full Resume'}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -695,122 +705,54 @@ export function RawResumeTextPage({ sessionId }: { sessionId: string }) {
   )
 }
 
-// ─── Experience sections (grouped by type) ────────────────────────────────────
+// ─── Section card ─────────────────────────────────────────────────────────────
 
-function ExperienceSections({
-  rawText,
-  artifactSections,
+function SectionCard({
+  block,
+  sectionWarnings,
   canRefine,
-  copiedKey,
-  onCopy,
   onRefine,
   onAccept,
   onReject,
+  onManualEdit,
+  onIgnoreWarning,
+  onUnignoreWarning,
 }: {
-  rawText: Stage4RawResumeText
-  artifactSections: ArtifactSection[]
+  block: Stage4Section
+  sectionWarnings: SectionWarning[]
   canRefine: boolean
-  copiedKey: string | null
-  onCopy: (key: string, text: string) => void
-  onRefine: (key: string, instruction: string) => Promise<unknown>
-  onAccept: (key: string) => void
-  onReject: (key: string) => void
-}) {
-  const experienceSectionTypes = ['experience-primary', 'experience-secondary', 'experience-supporting'] as const
-  const EXPERIENCE_LABELS: Record<string, string> = {
-    'experience-primary': 'Product Owner Experience',
-    'experience-secondary': 'Business Analyst Experience',
-    'experience-supporting': 'QA / Quality Experience',
-  }
-
-  const sections: Array<{ key: string; label: string; text: string }> = []
-
-  // Preferred order: first by presence of an accepted refinement, then by original block order
-  for (const sectionType of experienceSectionTypes) {
-    const srcSection = artifactSections.find(s => s.type === sectionType)
-    const ref = rawText.sectionRefinements?.[sectionType]
-    const hasBlocks = srcSection
-      ? rawText.sections.experiences.some(b => b.sourceArtifactSectionId === srcSection.id)
-      : false
-
-    if (!hasBlocks && !ref) continue
-
-    const text = ref?.accepted && ref.output
-      ? ref.output
-      : srcSection
-        ? rawText.sections.experiences
-            .filter(b => b.sourceArtifactSectionId === srcSection.id)
-            .map(formatExperienceBlock)
-            .join('\n\n')
-        : ''
-
-    if (!text) continue
-    sections.push({ key: sectionType, label: EXPERIENCE_LABELS[sectionType], text })
-  }
-
-  if (sections.length === 0) return null
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-gray-300">Experience</h2>
-        <button
-          onClick={() => onCopy('experience-all', sections.map(s => s.text).join('\n\n'))}
-          className="text-xs px-3 py-1.5 border border-gray-700 text-gray-300 rounded hover:border-gray-500 disabled:opacity-40"
-        >
-          {copiedKey === 'experience-all' ? 'Copied' : 'Copy All Experience'}
-        </button>
-      </div>
-      {sections.map(({ key, label, text }) => (
-        <RefinableTextBlock
-          key={key}
-          sectionKey={key as RefineKey}
-          title={label}
-          text={text}
-          rawText={rawText}
-          canRefine={canRefine}
-          copied={copiedKey === key}
-          onCopy={t => onCopy(key, t)}
-          onRefine={inst => onRefine(key, inst)}
-          onAccept={() => onAccept(key)}
-          onReject={() => onReject(key)}
-        />
-      ))}
-    </div>
-  )
-}
-
-// ─── Full resume refinement panel ────────────────────────────────────────────
-
-function FullRefinementPanel({
-  rawText,
-  onRefine,
-  onAccept,
-  onReject,
-  onCopy,
-  copied,
-}: {
-  rawText: Stage4RawResumeText
-  onRefine: (instruction: string) => Promise<{ revisedText: string; changeSummary: string[]; warnings: string[] } | null>
+  onRefine: (instruction: string) => Promise<void>
   onAccept: () => void
   onReject: () => void
-  onCopy: (text: string) => void
-  copied: boolean
+  onManualEdit: (text: string) => void
+  onIgnoreWarning: (warningId: string) => void
+  onUnignoreWarning: (warningId: string) => void
 }) {
-  const [open, setOpen] = useState(false)
-  const [instruction, setInstruction] = useState(rawText.refinementInstruction ?? '')
+  const [copiedSection, setCopiedSection] = useState(false)
+  const [showRefine, setShowRefine] = useState(false)
+  const [showEdit, setShowEdit] = useState(false)
+  const [refineInstruction, setRefineInstruction] = useState('')
+  const [editText, setEditText] = useState(block.acceptedText)
   const [refining, setRefining] = useState(false)
   const [localError, setLocalError] = useState('')
 
-  const pending = rawText.refinementOutput && !rawText.refinementAccepted
-  const accepted = rawText.refinementAccepted && rawText.refinementOutput
+  const label = SECTION_DISPLAY[block.sectionType] ?? block.sectionType
+  const hasProposal = !!block.proposedText
 
-  async function submit() {
-    if (!instruction.trim()) return
+  async function copySection() {
+    await navigator.clipboard.writeText(block.acceptedText)
+    setCopiedSection(true)
+    setTimeout(() => setCopiedSection(false), 1600)
+  }
+
+  async function submitRefine() {
+    if (!refineInstruction.trim()) return
     setRefining(true)
     setLocalError('')
     try {
-      await onRefine(instruction.trim())
+      await onRefine(refineInstruction.trim())
+      setShowRefine(false)
+      setRefineInstruction('')
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : 'Refinement failed.')
     } finally {
@@ -818,260 +760,75 @@ function FullRefinementPanel({
     }
   }
 
-  return (
-    <div className="border border-gray-600 rounded-lg overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-4 py-3 bg-gray-800/60 hover:bg-gray-800/90 text-left"
-      >
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-gray-200">Refine Full Resume</span>
-          {accepted && (
-            <span className="text-xs px-2 py-0.5 bg-green-900/60 text-green-300 rounded border border-green-800/50">
-              Accepted
-            </span>
-          )}
-          {pending && !accepted && (
-            <span className="text-xs px-2 py-0.5 bg-amber-900/60 text-amber-300 rounded border border-amber-800/50">
-              Pending review
-            </span>
-          )}
-        </div>
-        <span className="text-gray-400 text-xs ml-3">{open ? '▲' : '▼'}</span>
-      </button>
-
-      {open && (
-        <div className="px-4 py-4 space-y-4 bg-gray-900/40">
-          <p className="text-xs text-gray-400">
-            Applies a single instruction to the entire assembled resume. Accepted output replaces
-            the full-text copy. Stage 3 artifact sections are not modified.
-          </p>
-
-          {accepted && rawText.refinementOutput && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-green-300 font-medium">Accepted refinement output</p>
-                <button
-                  onClick={() => onCopy(rawText.refinementOutput!)}
-                  className="text-xs px-3 py-1.5 border border-gray-600 text-gray-300 rounded hover:border-gray-400"
-                >
-                  {copied ? 'Copied' : 'Copy'}
-                </button>
-              </div>
-              <pre className="whitespace-pre-wrap text-xs font-mono text-gray-200 bg-gray-950/40 rounded p-3 max-h-64 overflow-y-auto">
-                {rawText.refinementOutput}
-              </pre>
-              <button
-                onClick={() => { onReject(); setInstruction('') }}
-                className="text-xs text-gray-400 underline hover:text-gray-200"
-              >
-                Clear and start over
-              </button>
-            </div>
-          )}
-
-          {!accepted && (
-            <>
-              <div>
-                <label className="block text-xs font-medium text-gray-300 mb-1">
-                  Refinement instruction
-                </label>
-                <textarea
-                  className={`${textareaCls} h-20 text-xs`}
-                  value={instruction}
-                  onChange={e => setInstruction(e.target.value)}
-                  placeholder={'e.g. "Tighten to two pages" or "Make this more tactical and less senior" or "Remove Azure DevOps and emphasize Jira"'}
-                  disabled={refining}
-                />
-              </div>
-
-              {pending && rawText.refinementOutput && (
-                <div className="space-y-3">
-                  <p className="text-xs text-amber-300 font-medium">Pending refinement output — review before accepting</p>
-                  <pre className="whitespace-pre-wrap text-xs font-mono text-gray-200 bg-gray-950/40 rounded p-3 max-h-72 overflow-y-auto border border-amber-800/30">
-                    {rawText.refinementOutput}
-                  </pre>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={onAccept}
-                      className="px-3 py-1.5 bg-green-800 text-green-100 rounded text-xs font-medium hover:bg-green-700"
-                    >
-                      Accept
-                    </button>
-                    <button
-                      onClick={() => { onReject(); setInstruction('') }}
-                      className="px-3 py-1.5 border border-gray-600 text-gray-300 rounded text-xs hover:border-gray-400"
-                    >
-                      Reject
-                    </button>
-                    <button
-                      onClick={submit}
-                      disabled={!instruction.trim() || refining}
-                      className="px-3 py-1.5 border border-gray-600 text-gray-300 rounded text-xs hover:border-gray-400 disabled:opacity-50"
-                    >
-                      {refining ? <span className="flex items-center gap-1"><Spinner className="text-gray-300" /> Refining…</span> : 'Refine Again'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {!pending && (
-                <button
-                  onClick={submit}
-                  disabled={!instruction.trim() || refining}
-                  className="px-4 py-2 bg-gray-700 text-white rounded text-sm font-medium hover:bg-gray-600 disabled:opacity-50 flex items-center gap-2"
-                >
-                  {refining && <Spinner className="text-white" />}
-                  {refining ? 'Refining…' : 'Refine Full Resume'}
-                </button>
-              )}
-
-              {localError && (
-                <p className="text-xs text-red-400">{localError}</p>
-              )}
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Refinable text block ─────────────────────────────────────────────────────
-
-function RefinableTextBlock({
-  sectionKey,
-  title,
-  text,
-  rawText,
-  canRefine,
-  copied,
-  onCopy,
-  onRefine,
-  onAccept,
-  onReject,
-}: {
-  sectionKey: RefineKey
-  title: string
-  text: string
-  rawText: Stage4RawResumeText
-  canRefine: boolean
-  copied: boolean
-  onCopy: (text: string) => void
-  onRefine: (instruction: string) => Promise<unknown>
-  onAccept: () => void
-  onReject: () => void
-}) {
-  const ref = rawText.sectionRefinements?.[sectionKey]
-  const hasPending = !!ref && !ref.accepted
-  const hasAccepted = !!ref?.accepted
+  function submitEdit() {
+    onManualEdit(editText)
+    setShowEdit(false)
+  }
 
   return (
     <section className="border border-gray-700 rounded-lg overflow-hidden">
+      {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-gray-700 bg-gray-800/60">
         <div className="flex items-center gap-2">
-          <h2 className="text-sm font-medium text-white">{title}</h2>
-          {hasAccepted && (
-            <span className="text-xs px-2 py-0.5 bg-green-900/60 text-green-300 rounded border border-green-800/50">
-              Refined
+          <h2 className="text-sm font-medium text-white">{label}</h2>
+          {block.status === 'manual' && (
+            <span className="text-xs px-2 py-0.5 bg-blue-900/60 text-blue-300 rounded border border-blue-800/50">
+              Edited
             </span>
           )}
-          {hasPending && (
+          {hasProposal && (
             <span className="text-xs px-2 py-0.5 bg-amber-900/60 text-amber-300 rounded border border-amber-800/50">
-              Pending
+              Proposal ready
             </span>
           )}
+          {sectionWarnings.length > 0 && (() => {
+            const ignored = new Set(block.ignoredWarningIds ?? [])
+            const visible = sectionWarnings.filter(w => !ignored.has(w.id))
+            const errCount = visible.filter(w => w.severity === 'error').length
+            const warnCount = visible.filter(w => w.severity === 'warning').length
+            const advCount = visible.filter(w => w.severity === 'advisory').length
+            if (visible.length === 0) return null
+            return (
+              <span className="flex items-center gap-1">
+                {errCount > 0 && <span className="text-xs px-1.5 py-0.5 bg-red-900/40 text-red-300 rounded">{errCount}e</span>}
+                {warnCount > 0 && <span className="text-xs px-1.5 py-0.5 bg-amber-900/30 text-amber-300 rounded">{warnCount}w</span>}
+                {advCount > 0 && <span className="text-xs px-1.5 py-0.5 bg-blue-900/20 text-blue-400 rounded">{advCount}a</span>}
+              </span>
+            )
+          })()}
         </div>
         <button
-          onClick={() => onCopy(text)}
-          disabled={!text.trim()}
+          onClick={copySection}
+          disabled={!block.acceptedText.trim()}
           className="text-xs px-3 py-1.5 border border-gray-600 text-gray-300 rounded hover:border-gray-400 hover:text-white disabled:opacity-40"
         >
-          {copied ? 'Copied' : 'Copy Section'}
+          {copiedSection ? 'Copied' : 'Copy'}
         </button>
       </div>
-      <pre className="min-h-16 whitespace-pre-wrap text-left font-mono text-sm leading-relaxed text-gray-200 bg-gray-950/40 px-4 py-3">
-        {text || 'No accepted text available for this block.'}
+
+      {/* Current accepted text */}
+      <pre className="whitespace-pre-wrap text-left font-mono text-sm leading-relaxed text-gray-200 bg-gray-950/40 px-4 py-3 min-h-12">
+        {block.acceptedText || <span className="text-gray-600 italic">No accepted text.</span>}
       </pre>
 
-      {canRefine && (
-        <SectionRefinementPanel
-          sectionKey={sectionKey}
-          refinement={ref}
-          onRefine={onRefine}
-          onAccept={onAccept}
-          onReject={onReject}
+      {/* Section warnings */}
+      {sectionWarnings.length > 0 && (
+        <SectionWarningList
+          warnings={sectionWarnings}
+          ignoredIds={block.ignoredWarningIds ?? []}
+          onIgnore={onIgnoreWarning}
+          onUnignore={onUnignoreWarning}
         />
       )}
-    </section>
-  )
-}
 
-// ─── Section refinement panel ─────────────────────────────────────────────────
-
-function SectionRefinementPanel({
-  sectionKey,
-  refinement,
-  onRefine,
-  onAccept,
-  onReject,
-}: {
-  sectionKey: RefineKey
-  refinement: import('@/contracts').Stage4SectionRefinement | undefined
-  onRefine: (instruction: string) => Promise<unknown>
-  onAccept: () => void
-  onReject: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [instruction, setInstruction] = useState(refinement?.instruction ?? '')
-  const [refining, setRefining] = useState(false)
-  const [localError, setLocalError] = useState('')
-
-  const hasPending = !!refinement && !refinement.accepted
-
-  async function submit() {
-    if (!instruction.trim()) return
-    setRefining(true)
-    setLocalError('')
-    try {
-      await onRefine(instruction.trim())
-    } catch (err) {
-      setLocalError(err instanceof Error ? err.message : 'Section refinement failed.')
-    } finally {
-      setRefining(false)
-    }
-  }
-
-  if (!open) {
-    return (
-      <div className="border-t border-gray-700/50 px-4 py-2">
-        <button
-          onClick={() => setOpen(true)}
-          className="text-xs text-gray-400 hover:text-gray-200 underline"
-        >
-          {refinement?.accepted ? 'Revise again' : 'Request Changes'}
-        </button>
-      </div>
-    )
-  }
-
-  return (
-    <div className="border-t border-gray-700/50 px-4 py-3 bg-gray-900/30 space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-gray-300">Refine section</span>
-        <button onClick={() => setOpen(false)} className="text-xs text-gray-500 hover:text-gray-300">
-          ✕
-        </button>
-      </div>
-
-      {hasPending && refinement && (
-        <div className="space-y-2">
-          <p className="text-xs text-amber-300 font-medium">Pending output — review before accepting</p>
-          <pre className="whitespace-pre-wrap text-xs font-mono text-gray-200 bg-gray-950/40 rounded p-3 max-h-48 overflow-y-auto border border-amber-800/30">
-            {refinement.output}
+      {/* Proposal block */}
+      {hasProposal && block.proposedText && (
+        <div className="border-t border-amber-800/30 bg-amber-950/10 px-4 py-3 space-y-2">
+          <p className="text-xs font-medium text-amber-300">Proposed revision — review before accepting</p>
+          <pre className="whitespace-pre-wrap text-xs font-mono text-gray-200 bg-gray-950/40 rounded p-3 max-h-64 overflow-y-auto border border-amber-800/30">
+            {block.proposedText}
           </pre>
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex gap-2">
             <button
               onClick={onAccept}
               className="px-3 py-1.5 bg-green-800 text-green-100 rounded text-xs font-medium hover:bg-green-700"
@@ -1079,69 +836,251 @@ function SectionRefinementPanel({
               Accept
             </button>
             <button
-              onClick={() => { onReject(); setInstruction('') }}
+              onClick={onReject}
               className="px-3 py-1.5 border border-gray-600 text-gray-300 rounded text-xs hover:border-gray-400"
             >
               Reject
-            </button>
-            <button
-              onClick={submit}
-              disabled={!instruction.trim() || refining}
-              className="px-3 py-1.5 border border-gray-600 text-gray-300 rounded text-xs hover:border-gray-400 disabled:opacity-50"
-            >
-              {refining ? <span className="flex items-center gap-1"><Spinner className="text-gray-300" />Refining…</span> : 'Refine Again'}
             </button>
           </div>
         </div>
       )}
 
-      <div>
-        <label className="block text-xs font-medium text-gray-400 mb-1">Instruction</label>
-        <textarea
-          className={`${textareaCls} h-16 text-xs`}
-          value={instruction}
-          onChange={e => setInstruction(e.target.value)}
-          placeholder={SECTION_PLACEHOLDERS[sectionKey] ?? 'Describe the change you want…'}
-          disabled={refining}
-        />
-      </div>
-
-      {!hasPending && (
-        <button
-          onClick={submit}
-          disabled={!instruction.trim() || refining}
-          className="px-3 py-1.5 bg-gray-700 text-white rounded text-xs font-medium hover:bg-gray-600 disabled:opacity-50 flex items-center gap-2"
-        >
-          {refining && <Spinner className="text-white" />}
-          {refining ? 'Refining…' : 'Refine Section'}
-        </button>
+      {/* Controls */}
+      {canRefine && !showRefine && !showEdit && (
+        <div className="border-t border-gray-700/50 px-4 py-2 flex items-center gap-3">
+          <button
+            onClick={() => setShowRefine(true)}
+            className="text-xs text-gray-400 hover:text-gray-200 underline"
+          >
+            Refine with note
+          </button>
+          <button
+            onClick={() => { setEditText(block.acceptedText); setShowEdit(true) }}
+            className="text-xs text-gray-400 hover:text-gray-200 underline"
+          >
+            Edit manually
+          </button>
+        </div>
       )}
 
-      {localError && <p className="text-xs text-red-400">{localError}</p>}
+      {/* Inline refine panel */}
+      {showRefine && (
+        <div className="border-t border-gray-700/50 px-4 py-3 bg-gray-900/30 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-gray-300">Refine {label}</span>
+            <button onClick={() => { setShowRefine(false); setLocalError('') }} className="text-xs text-gray-500 hover:text-gray-300">✕</button>
+          </div>
+          <textarea
+            className={`${textareaCls} h-16 text-xs`}
+            value={refineInstruction}
+            onChange={e => setRefineInstruction(e.target.value)}
+            placeholder="Describe the change you want…"
+            disabled={refining}
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={submitRefine}
+              disabled={!refineInstruction.trim() || refining}
+              className="px-3 py-1.5 bg-gray-700 text-white rounded text-xs font-medium hover:bg-gray-600 disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {refining && <Spinner className="text-white" />}
+              {refining ? 'Refining…' : 'Refine'}
+            </button>
+            <button onClick={() => { setShowRefine(false); setLocalError('') }} className="text-xs text-gray-500 hover:text-gray-300">Cancel</button>
+          </div>
+          {localError && <p className="text-xs text-red-400">{localError}</p>}
+        </div>
+      )}
+
+      {/* Inline manual edit */}
+      {showEdit && (
+        <div className="border-t border-gray-700/50 px-4 py-3 bg-gray-900/30 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-gray-300">Edit {label}</span>
+            <button onClick={() => setShowEdit(false)} className="text-xs text-gray-500 hover:text-gray-300">✕</button>
+          </div>
+          <textarea
+            className={`${textareaCls} text-xs`}
+            rows={Math.max(6, editText.split('\n').length + 2)}
+            value={editText}
+            onChange={e => setEditText(e.target.value)}
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={submitEdit}
+              className="px-3 py-1.5 bg-gray-700 text-white rounded text-xs font-medium hover:bg-gray-600"
+            >
+              Save
+            </button>
+            <button onClick={() => setShowEdit(false)} className="text-xs text-gray-500 hover:text-gray-300">Cancel</button>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ─── Section warning list ─────────────────────────────────────────────────────
+
+const SEVERITY_ICON: Record<string, string> = {
+  error: '✗',
+  warning: '⚠',
+  advisory: '◦',
+}
+
+function SectionWarningList({
+  warnings,
+  ignoredIds,
+  onIgnore,
+  onUnignore,
+}: {
+  warnings: SectionWarning[]
+  ignoredIds: string[]
+  onIgnore: (id: string) => void
+  onUnignore: (id: string) => void
+}) {
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  const [showIgnored, setShowIgnored] = useState(false)
+
+  const ignored = new Set(ignoredIds)
+  const visible = warnings.filter(w => !ignored.has(w.id))
+  const hiddenCount = warnings.length - visible.length
+  const allExpanded = visible.length > 0 && visible.every(w => expandedIds.has(w.id))
+
+  function toggleOne(id: string) {
+    setExpandedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  function toggleAll() {
+    setExpandedIds(allExpanded ? new Set() : new Set(visible.map(w => w.id)))
+  }
+
+  if (visible.length === 0 && hiddenCount === 0) return null
+
+  return (
+    <div className="border-t border-gray-700/40 divide-y divide-gray-700/30">
+      {/* Expand-all control */}
+      {visible.length > 1 && (
+        <div className="px-4 py-1.5 flex justify-end">
+          <button
+            onClick={toggleAll}
+            className="text-[10px] text-gray-500 hover:text-gray-300 underline"
+          >
+            {allExpanded ? 'Collapse all' : 'Expand all'}
+          </button>
+        </div>
+      )}
+
+      {visible.map(w => {
+        const isExpanded = expandedIds.has(w.id)
+        const colorCls = SECTION_WARNING_SEVERITY_COLOR[w.severity] ?? 'text-gray-400 bg-gray-800/20'
+
+        return (
+          <div key={w.id} className="text-xs">
+            <button
+              onClick={() => toggleOne(w.id)}
+              className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-gray-800/40 transition-colors"
+            >
+              <span className={`shrink-0 w-4 text-center font-bold ${colorCls.split(' ')[0]}`}>
+                {SEVERITY_ICON[w.severity]}
+              </span>
+              <span className="flex-1 text-gray-300">
+                {SECTION_WARNING_LABELS[w.warningType] ?? w.warningType}
+              </span>
+              <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${colorCls}`}>
+                {w.severity}
+              </span>
+              <span className="shrink-0 text-gray-600">{isExpanded ? '▲' : '▼'}</span>
+            </button>
+
+            {isExpanded && (
+              <div className="px-4 pb-3 pt-1 space-y-2 bg-gray-900/30">
+                <div className="space-y-1">
+                  <p className="text-[10px] text-gray-500 uppercase tracking-wide font-medium">Affected text</p>
+                  <pre className="text-gray-300 font-mono text-[11px] whitespace-pre-wrap bg-gray-950/60 px-2 py-1 rounded leading-relaxed">
+                    {w.affectedText}
+                  </pre>
+                </div>
+                <div>
+                  <p className="text-[10px] text-gray-500 uppercase tracking-wide font-medium mb-0.5">Why it matters</p>
+                  <p className="text-gray-300 leading-relaxed">{w.explanation}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-gray-500 uppercase tracking-wide font-medium mb-0.5">Suggested action</p>
+                  <p className="text-gray-300">{SUGGESTED_ACTION_LABELS[w.suggestedAction] ?? w.suggestedAction}</p>
+                </div>
+                {w.repairInstruction && (
+                  <div>
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wide font-medium mb-0.5">Repair instruction</p>
+                    <p className="text-amber-200/80 italic">{w.repairInstruction}</p>
+                  </div>
+                )}
+                <button
+                  onClick={() => { onIgnore(w.id); toggleOne(w.id) }}
+                  className="text-[10px] text-gray-500 hover:text-gray-300 underline"
+                >
+                  Ignore for this resume
+                </button>
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      {hiddenCount > 0 && (
+        <div className="px-4 py-2 flex items-center justify-between">
+          <span className="text-[10px] text-gray-600">{hiddenCount} ignored warning{hiddenCount !== 1 ? 's' : ''}</span>
+          <button
+            onClick={() => setShowIgnored(!showIgnored)}
+            className="text-[10px] text-gray-500 hover:text-gray-300 underline"
+          >
+            {showIgnored ? 'Hide' : 'Show ignored'}
+          </button>
+        </div>
+      )}
+
+      {showIgnored && hiddenCount > 0 && (
+        <div className="divide-y divide-gray-700/20">
+          {warnings.filter(w => ignored.has(w.id)).map(w => (
+            <div key={w.id} className="px-4 py-2 flex items-center gap-2 text-xs">
+              <span className="text-gray-600 line-through flex-1">
+                {SECTION_WARNING_LABELS[w.warningType] ?? w.warningType}
+              </span>
+              <button
+                onClick={() => onUnignore(w.id)}
+                className="text-[10px] text-gray-600 hover:text-gray-400 underline"
+              >
+                Restore
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
-const SECTION_PLACEHOLDERS: Partial<Record<RefineKey, string>> = {
-  summary: 'e.g. "Lead with fintech experience" or "Tighten to 3 sentences"',
-  skills: 'e.g. "Remove Azure DevOps and emphasize Jira" or "Add SpecFlow under Testing"',
-  'experience-primary': 'e.g. "Reduce by 2 lines" or "Emphasize backlog ownership over delivery metrics"',
-  'experience-secondary': 'e.g. "Lead with gap analysis work" or "Tighten to 4 bullets"',
-  'experience-supporting': 'e.g. "Emphasize automation over manual testing" or "Add SpecFlow if evidenced"',
-  education: 'e.g. "Add CSPO year if from bridge answers" or "Separate certifications from degrees"',
-}
+// ─── Repair preview panel ─────────────────────────────────────────────────────
 
 function RepairPreviewPanel({
   preview,
-  copied,
-  onCopy,
   onAccept,
 }: {
   preview: RepairPreview
-  copied: boolean
-  onCopy: () => void
   onAccept: () => void
 }) {
+  const [copied, setCopied] = useState(false)
+
+  async function copy() {
+    await navigator.clipboard.writeText(preview.repairedText)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1600)
+  }
+
   return (
     <div className="border border-amber-800/60 rounded-lg bg-amber-950/20 p-4 space-y-3">
       <div className="flex items-center justify-between gap-3">
@@ -1150,12 +1089,12 @@ function RepairPreviewPanel({
           <p className="text-xs text-amber-100/75 mt-1">
             {preview.changed
               ? 'Auto-repair changed the output, but validation still has remaining violations.'
-              : 'Auto-repair could not change the output because remaining violations require validator or source-data changes.'}
+              : 'Auto-repair could not change the output — remaining violations need source-data changes.'}
           </p>
         </div>
         <div className="flex gap-2">
           <button
-            onClick={onCopy}
+            onClick={copy}
             className="text-xs px-3 py-1.5 border border-amber-700 text-amber-100 rounded hover:bg-amber-900/40"
           >
             {copied ? 'Copied' : 'Copy Preview'}
@@ -1165,7 +1104,7 @@ function RepairPreviewPanel({
               onClick={onAccept}
               className="text-xs px-3 py-1.5 bg-amber-700 text-amber-50 rounded hover:bg-amber-600"
             >
-              Accept Partial Repair
+              Accept Partial
             </button>
           )}
         </div>
@@ -1173,9 +1112,9 @@ function RepairPreviewPanel({
 
       {preview.repairsApplied.length > 0 && (
         <div>
-          <p className="text-xs font-medium text-amber-200 mb-1">Repair activity</p>
+          <p className="text-xs font-medium text-amber-200 mb-1">Repairs applied</p>
           <ul className="space-y-1 text-xs text-amber-100/80">
-            {preview.repairsApplied.map((repair, i) => <li key={i}>{repair}</li>)}
+            {preview.repairsApplied.map((r, i) => <li key={i}>{r}</li>)}
           </ul>
         </div>
       )}
@@ -1184,19 +1123,14 @@ function RepairPreviewPanel({
         <div>
           <p className="text-xs font-medium text-red-300 mb-1">Remaining violations</p>
           <ul className="space-y-1 text-xs text-red-200/90">
-            {preview.unfixedViolations.map((violation, i) => <li key={i}>{violation}</li>)}
+            {preview.unfixedViolations.map((v, i) => <li key={i}>{v}</li>)}
           </ul>
         </div>
-      )}
-
-      {preview.changed && (
-        <pre className="whitespace-pre-wrap text-xs font-mono text-gray-200 bg-gray-950/40 rounded p-3 max-h-72 overflow-y-auto border border-amber-800/30">
-          {preview.repairedText}
-        </pre>
       )}
     </div>
   )
 }
+
 // ─── Validation panel ─────────────────────────────────────────────────────────
 
 function ValidationPanel({
@@ -1223,7 +1157,16 @@ function ValidationPanel({
             {warnings.length > 0 && `, ${warnings.length} warning${warnings.length !== 1 ? 's' : ''}`}
           </span>
         </div>
-        {(hasSemanticErrors || errors.some(v => !v.canAutoRepair)) && (
+        {!hasSemanticErrors && errors.every(v => v.canAutoRepair) && errors.length > 0 ? (
+          <button
+            onClick={onRepair}
+            disabled={repairing}
+            className="text-xs px-3 py-1.5 bg-green-800 text-green-100 rounded hover:bg-green-700 disabled:opacity-50 flex items-center gap-1.5"
+          >
+            {repairing && <Spinner className="text-green-200" />}
+            {repairing ? 'Repairing…' : 'Fix Automatically'}
+          </button>
+        ) : (
           <button
             onClick={onRepair}
             disabled={repairing}
@@ -1233,34 +1176,20 @@ function ValidationPanel({
             {repairing ? 'Repairing…' : 'Run Auto-Repair'}
           </button>
         )}
-        {!hasSemanticErrors && errors.every(v => v.canAutoRepair) && errors.length > 0 && (
-          <button
-            onClick={onRepair}
-            disabled={repairing}
-            className="text-xs px-3 py-1.5 bg-green-800 text-green-100 rounded hover:bg-green-700 disabled:opacity-50 flex items-center gap-1.5"
-          >
-            {repairing && <Spinner className="text-green-200" />}
-            {repairing ? 'Repairing…' : 'Fix Automatically'}
-          </button>
-        )}
       </div>
 
       {errors.length > 0 && (
         <div className="space-y-1.5">
           {errors.map((v, i) => (
             <div key={i} className="flex items-start gap-2 text-xs">
-              <span className={`mt-0.5 shrink-0 text-xs ${v.canAutoRepair ? 'text-amber-400' : 'text-red-400'}`}>
+              <span className={`mt-0.5 shrink-0 ${v.canAutoRepair ? 'text-amber-400' : 'text-red-400'}`}>
                 {v.canAutoRepair ? '⚙' : '✗'}
               </span>
               <div>
                 <span className="text-red-300 font-medium">[{v.rule}]</span>
-                {' '}
-                <span className="text-gray-400">{v.section}:</span>
-                {' '}
-                <span className="text-gray-300">{v.detail}</span>
-                {v.canAutoRepair && (
-                  <span className="ml-1 text-amber-500 italic">(auto-repairable)</span>
-                )}
+                {' '}<span className="text-gray-400">{v.section}:</span>
+                {' '}<span className="text-gray-300">{v.detail}</span>
+                {v.canAutoRepair && <span className="ml-1 text-amber-500 italic">(auto-repairable)</span>}
               </div>
             </div>
           ))}
@@ -1268,36 +1197,58 @@ function ValidationPanel({
       )}
 
       {warnings.length > 0 && (
-        <div className="space-y-1.5 border-t border-gray-700/50 pt-2">
+        <div className="space-y-2 border-t border-gray-700/50 pt-2">
           <p className="text-xs text-gray-500 font-medium">Warnings (advisory)</p>
-          {warnings.map((v, i) => (
-            <div key={i} className="flex items-start gap-2 text-xs">
-              <span className="mt-0.5 shrink-0 text-yellow-500">⚠</span>
-              <div>
-                <span className="text-yellow-400 font-medium">[{v.rule}]</span>
-                {' '}
-                <span className="text-gray-400">{v.section}:</span>
-                {' '}
-                <span className="text-gray-400">{v.detail}</span>
+          {warnings.map((v, i) => {
+            const tw = validation.themeWarnings?.find(
+              t => t.themeLabel === v.detail.match(/"([^"]+)"/)?.[1]
+            )
+            return (
+              <div key={i} className="flex items-start gap-2 text-xs">
+                <span className="mt-0.5 shrink-0 text-yellow-500">⚠</span>
+                <div className="space-y-1 min-w-0">
+                  <div>
+                    <span className="text-yellow-400 font-medium">[{v.rule}]</span>
+                    {' '}<span className="text-gray-400">{v.section}:</span>
+                    {' '}<span className="text-gray-400">{v.detail}</span>
+                  </div>
+                  {tw && tw.matchingExperienceBullets.length > 0 && (
+                    <div className="ml-1 border-l border-green-800/40 pl-2 space-y-0.5">
+                      <p className="text-green-600 text-[10px] font-medium">Evidence found:</p>
+                      {tw.matchingExperienceBullets.map((b, bi) => (
+                        <p key={bi} className="text-green-700/80 text-[10px] truncate">{b}</p>
+                      ))}
+                    </div>
+                  )}
+                  {tw && tw.suggestedAction !== 'ignore' && (
+                    <p className="text-amber-600/70 text-[10px] italic">
+                      {tw.suggestedAction === 'refine_section' && 'Add a bullet that proves this theme (it appears in Skills only).'}
+                      {tw.suggestedAction === 'remove_skill' && 'Consider removing this skill if it cannot be proven.'}
+                      {tw.suggestedAction === 'add_bridge_question' && 'No evidence found — add a bridge question to surface relevant experience.'}
+                    </p>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
   )
 }
 
-// ─── Quality Trace Panel (dev-only, collapsed by default) ─────────────────────
+// ─── Quality trace panel (dev-only) ──────────────────────────────────────────
 
 function QualityTracePanel({
   trace,
   open,
   onToggle,
+  warningSummary,
 }: {
   trace: Stage4QualityTrace
   open: boolean
   onToggle: () => void
+  warningSummary?: import('@/lib/stage4/section-warnings').WarningSummary
 }) {
   const { rulesetTrace, strategyBriefTrace, blueprintTrace, generationTrace, validationTrace, reviewTrace, repairTrace } = trace
 
@@ -1347,81 +1298,43 @@ function QualityTracePanel({
               <BoolRow label="Strategy brief built" value={strategyBriefTrace.built} />
               <CountRow label="active rule IDs" count={rulesetTrace.activeRuleIds.length} />
               <CountRow label="anti-pattern IDs" count={rulesetTrace.antiPatternIds.length} />
-              {strategyBriefTrace.jdCriticalThemes.length > 0 && (
-                <div className="mt-1 text-xs text-gray-500">
-                  themes: {strategyBriefTrace.jdCriticalThemes.join(', ')}
-                </div>
-              )}
             </div>
-
             <div className="space-y-1.5">
               <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Blueprint / Generation</p>
               <BoolRow label="Blueprint built" value={blueprintTrace.built} />
               <BoolRow label="Prompt has strategy brief" value={generationTrace.promptIncludesStrategyBrief} />
               <BoolRow label="Prompt has blueprint" value={generationTrace.promptIncludesBlueprint} />
-              <BoolRow label="Prompt has banned phrases" value={generationTrace.promptIncludesBannedPhrases} />
               <CountRow label="bullet intent count" count={blueprintTrace.bulletIntentCount} />
             </div>
-
             <div className="space-y-1.5">
               <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Validation</p>
               <BoolRow label="Ran deterministic validation" value={validationTrace.ranDeterministicValidation} />
-              <CountRow label="violations" count={validationTrace.violationCount} />
-              {validationTrace.violationRules.length > 0 && (
-                <div className="mt-1 text-xs text-gray-500">
-                  rules: {validationTrace.violationRules.join(', ')}
-                </div>
+              <CountRow label="contract violations" count={validationTrace.violationCount} />
+              {warningSummary && (
+                <>
+                  <CountRow label="section errors" count={warningSummary.errorCount} />
+                  <CountRow label="section warnings" count={warningSummary.warningCount} />
+                  <CountRow label="style advisories" count={warningSummary.advisoryCount} />
+                  {(warningSummary.byType.role_boundary_leakage ?? 0) > 0 && (
+                    <CountRow label="boundary warnings" count={warningSummary.byType.role_boundary_leakage!} />
+                  )}
+                  {(warningSummary.byType.duplicate_evidence ?? 0) > 0 && (
+                    <CountRow label="duplicate evidence" count={warningSummary.byType.duplicate_evidence!} />
+                  )}
+                </>
               )}
             </div>
-
             <div className="space-y-1.5">
               <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Review / Repair</p>
               <BoolRow label="Ran critical review" value={reviewTrace.ranCriticalReview} />
-              {reviewTrace.artifactStatus && (
-                <div className="text-xs text-gray-400">status: {reviewTrace.artifactStatus}</div>
-              )}
               <CountRow label="rewrite directives" count={reviewTrace.rewriteDirectiveCount} />
               <BoolRow label="Repair attempted" value={repairTrace.repairAttempted} />
-              <BoolRow label="Deterministic repair applied" value={repairTrace.deterministicRepairApplied} />
               <BoolRow label="Final validation passed" value={repairTrace.finalValidationPassed} />
             </div>
           </div>
-
           <p className="text-xs text-gray-600 font-mono">{trace.generatedAt}</p>
         </div>
       )}
     </div>
-  )
-}
-
-// ─── Plain text block (no refinement) ────────────────────────────────────────
-
-function TextBlock({
-  title,
-  text,
-  copied,
-  onCopy,
-}: {
-  title: string
-  text: string
-  copied: boolean
-  onCopy: () => void
-}) {
-  return (
-    <section className="border border-gray-700 rounded-lg overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-700 bg-gray-800/60">
-        <h2 className="text-sm font-medium text-white">{title}</h2>
-        <button
-          onClick={onCopy}
-          disabled={!text.trim()}
-          className="text-xs px-3 py-1.5 border border-gray-600 text-gray-300 rounded hover:border-gray-400 hover:text-white disabled:opacity-40"
-        >
-          {copied ? 'Copied' : 'Copy Section'}
-        </button>
-      </div>
-      <pre className="min-h-20 whitespace-pre-wrap text-left font-mono text-sm leading-relaxed text-gray-200 bg-gray-950/40 px-4 py-3">
-        {text || 'No accepted text available for this block.'}
-      </pre>
-    </section>
   )
 }

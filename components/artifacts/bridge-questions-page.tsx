@@ -3,9 +3,19 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { getSession, updateSessionStatus } from '@/lib/storage/sessions'
 import { getUserProfile } from '@/lib/storage/user-profile'
-import { saveBridgeQuestions, getSessionBridgeQuestions, updateBridgeQuestion } from '@/lib/storage/bridge-questions'
+import {
+  saveBridgeQuestions,
+  getSessionBridgeQuestions,
+  updateBridgeQuestion,
+  invalidateSessionBridgeQuestions,
+  validateBridgeQuestionProvenance,
+  type BridgeQuestionProvenanceContext,
+} from '@/lib/storage/bridge-questions'
+import { getStage1Job } from '@/lib/storage/stage1-jobs'
 import { promoteBridgeAnswerToProfile } from '@/lib/profile/promoteBridgeAnswer'
-import type { BridgeQuestion, TargetIntake } from '@/contracts'
+import { convertCandidatesToBridgeQuestions } from '@/lib/llm/convert-bridge-candidates'
+import { computeJdHash } from '@/lib/llm/jd-hash'
+import type { BridgeQuestion, TargetIntake, Stage2QuestionCandidate } from '@/contracts'
 import { Spinner } from '@/components/shared/spinner'
 import { inputCls, textareaCls } from '@/lib/input-cls'
 
@@ -132,12 +142,43 @@ function JDContextSection({ session }: { session: TargetIntake }) {
   )
 }
 
+// ─── Staleness banner ─────────────────────────────────────────────────────────
+
+function StalenessBanner({ staleCount, onRegenerate, regenerating }: {
+  staleCount: number
+  onRegenerate: () => void
+  regenerating: boolean
+}) {
+  return (
+    <div className="flex items-start gap-3 p-3 bg-amber-950/40 border border-amber-700/60 rounded-lg">
+      <span className="text-amber-400 text-sm">⚠</span>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-amber-300 font-medium">
+          {staleCount} question{staleCount !== 1 ? 's are' : ' is'} stale
+        </p>
+        <p className="text-xs text-amber-500 mt-0.5">
+          The job description or Stage 1 analysis changed since these were generated. Regenerate to get questions grounded in the current session.
+        </p>
+      </div>
+      <button
+        onClick={onRegenerate}
+        disabled={regenerating}
+        className="shrink-0 px-3 py-1.5 bg-amber-700 text-white rounded text-xs font-medium hover:bg-amber-600 disabled:opacity-50 flex items-center gap-1.5"
+      >
+        {regenerating && <Spinner className="text-white" />}
+        Regenerate
+      </button>
+    </div>
+  )
+}
+
 // ─── Main component ────────────────────────────────────────────────────────────
 
 export function BridgeQuestionsPage({ sessionId }: { sessionId: string }) {
   const router = useRouter()
   const [session, setSession] = useState<TargetIntake | null>(null)
   const [questions, setQuestions] = useState<BridgeQuestion[]>([])
+  const [staleCount, setStaleCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState('')
@@ -146,40 +187,133 @@ export function BridgeQuestionsPage({ sessionId }: { sessionId: string }) {
     async function load() {
       const [s, qs] = await Promise.all([
         getSession(sessionId),
-        getSessionBridgeQuestions(sessionId)
+        getSessionBridgeQuestions(sessionId),
       ])
       setSession(s ?? null)
-      setQuestions(qs)
+      if (s && qs.length > 0) {
+        const { valid, stale } = await partitionByProvenance(qs, s)
+        setQuestions(valid)
+        setStaleCount(stale)
+      } else {
+        setQuestions(qs)
+      }
       setLoading(false)
     }
     load()
   }, [sessionId])
 
+  async function partitionByProvenance(
+    qs: BridgeQuestion[],
+    s: TargetIntake,
+  ): Promise<{ valid: BridgeQuestion[]; stale: number }> {
+    if (!s.stage1JobId) {
+      // Legacy session — no provenance to validate against
+      return { valid: qs, stale: 0 }
+    }
+    const job = await getStage1Job(s.stage1JobId)
+    if (!job) return { valid: qs, stale: 0 }
+
+    const jdHash = computeJdHash(s.jobDescription?.fullText ?? s.jdRequirementMap ? JSON.stringify(s.jdRequirementMap) : '')
+    const candidatesOutput = job.passes.bridgeQuestions?.output as Stage2QuestionCandidate[] | undefined
+    const activeRequirementIds = new Set(candidatesOutput?.map(c => c.requirementId).filter(Boolean) ?? [])
+
+    const ctx: BridgeQuestionProvenanceContext = {
+      sessionId,
+      stage1JobId: s.stage1JobId,
+      jdHash,
+      activeRequirementIds,
+    }
+
+    const valid = qs.filter(q => validateBridgeQuestionProvenance(q, ctx))
+    return { valid, stale: qs.length - valid.length }
+  }
+
+  async function generateFromStage1Job(s: TargetIntake) {
+    if (!s.stage1JobId) return false
+    const job = await getStage1Job(s.stage1JobId)
+    if (!job || job.passes.bridgeQuestions?.status !== 'completed') return false
+
+    const candidates = job.passes.bridgeQuestions.output as Stage2QuestionCandidate[] | undefined
+    if (!candidates || candidates.length === 0) return true // completed but empty
+
+    const jdText = s.jobDescription?.fullText ?? ''
+    const jdHash = computeJdHash(jdText)
+
+    const raw = convertCandidatesToBridgeQuestions(candidates, sessionId, s.stage1JobId, jdHash)
+    const saved = await saveBridgeQuestions(raw)
+    setQuestions(saved)
+    setStaleCount(0)
+    return true
+  }
+
   async function handleGenerate() {
     if (!session) return
-    const profile = await getUserProfile()
-    if (!profile) { setError('Profile required.'); return }
     setGenerating(true)
     setError('')
     try {
-      const res = await fetch('/api/bridge-questions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jdMap: session.jdRequirementMap,
-          profile,
-          emphasis: session.emphasisRecommendation,
-          sessionId,
-          fitAnalysis: session.fitAnalysis
+      // Primary path: use Stage 1 Pass F output (no LLM call)
+      const usedJob = await generateFromStage1Job(session)
+      if (!usedJob) {
+        // Fallback: LLM-based generation from JDRequirementMap (legacy sessions)
+        const profile = await getUserProfile()
+        if (!profile) { setError('Profile required.'); return }
+
+        const res = await fetch('/api/bridge-questions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jdMap: session.jdRequirementMap,
+            profile,
+            emphasis: session.emphasisRecommendation,
+            sessionId,
+            fitAnalysis: session.fitAnalysis,
+          }),
         })
-      })
-      if (!res.ok) throw new Error((await res.json()).error)
-      const { questions: raw } = await res.json()
-      const saved = await saveBridgeQuestions(raw)
-      setQuestions(saved)
+        if (!res.ok) throw new Error((await res.json()).error)
+        const { questions: raw } = await res.json()
+        const saved = await saveBridgeQuestions(raw)
+        setQuestions(saved)
+        setStaleCount(0)
+      }
       await updateSessionStatus(sessionId, 'bridge')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate questions.')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  async function handleRegenerate() {
+    if (!session) return
+    setGenerating(true)
+    setError('')
+    try {
+      await invalidateSessionBridgeQuestions(sessionId)
+      setQuestions([])
+      setStaleCount(0)
+      // Re-run generation directly (don't call handleGenerate to avoid double-setting generating state)
+      const usedJob = await generateFromStage1Job(session)
+      if (!usedJob) {
+        const profile = await getUserProfile()
+        if (!profile) { setError('Profile required.'); return }
+        const res = await fetch('/api/bridge-questions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jdMap: session.jdRequirementMap,
+            profile,
+            emphasis: session.emphasisRecommendation,
+            sessionId,
+            fitAnalysis: session.fitAnalysis,
+          }),
+        })
+        if (!res.ok) throw new Error((await res.json()).error)
+        const { questions: raw } = await res.json()
+        const saved = await saveBridgeQuestions(raw)
+        setQuestions(saved)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to regenerate questions.')
     } finally {
       setGenerating(false)
     }
@@ -230,10 +364,20 @@ export function BridgeQuestionsPage({ sessionId }: { sessionId: string }) {
 
       <div className="border-t border-gray-800" />
 
+      {staleCount > 0 && (
+        <StalenessBanner
+          staleCount={staleCount}
+          onRegenerate={handleRegenerate}
+          regenerating={generating}
+        />
+      )}
+
       {questions.length === 0 ? (
         <div className="space-y-4">
           <p className="text-sm text-gray-500">
-            No questions generated yet. Click below to generate targeted questions based on the JD gaps and your profile.
+            {session.stage1JobId
+              ? 'Bridge questions are ready. Click below to load them from Stage 1 analysis.'
+              : 'No questions generated yet. Click below to generate targeted questions based on the JD gaps and your profile.'}
           </p>
           {error && <p className="text-sm text-red-600">{error}</p>}
           <button
@@ -242,7 +386,7 @@ export function BridgeQuestionsPage({ sessionId }: { sessionId: string }) {
             className="px-5 py-2 bg-gray-900 text-white rounded text-sm font-medium hover:bg-gray-700 disabled:opacity-50 flex items-center gap-2"
           >
             {generating && <Spinner className="text-white" />}
-            Generate Bridge Questions
+            {session.stage1JobId ? 'Load Bridge Questions' : 'Generate Bridge Questions'}
           </button>
         </div>
       ) : (
@@ -275,6 +419,52 @@ export function BridgeQuestionsPage({ sessionId }: { sessionId: string }) {
     </div>
   )
 }
+
+// ─── Evidence status chip ─────────────────────────────────────────────────────
+
+const EVIDENCE_STATUS_LABEL: Record<string, string> = {
+  gap: 'Gap — no evidence',
+  weak: 'Weak evidence',
+  partial: 'Partial coverage',
+  retrieval_gap: 'Evidence exists, not surfaced',
+  covered: 'Covered',
+}
+
+const EVIDENCE_STATUS_COLOR: Record<string, string> = {
+  gap: 'text-red-500',
+  weak: 'text-amber-500',
+  partial: 'text-yellow-500',
+  retrieval_gap: 'text-blue-400',
+  covered: 'text-green-500',
+}
+
+function ProvenanceChip({ question }: { question: BridgeQuestion }) {
+  if (!question.stage1JobId) return null
+  return (
+    <div className="mt-2 pt-2 border-t border-gray-800 space-y-1">
+      {question.requirementLabel && (
+        <p className="text-xs text-gray-500">
+          <span className="text-gray-600">JD basis:</span> {question.requirementLabel}
+        </p>
+      )}
+      {question.evidenceStatus && (
+        <p className="text-xs">
+          <span className="text-gray-600">Evidence status: </span>
+          <span className={EVIDENCE_STATUS_COLOR[question.evidenceStatus] ?? 'text-gray-400'}>
+            {EVIDENCE_STATUS_LABEL[question.evidenceStatus] ?? question.evidenceStatus}
+          </span>
+        </p>
+      )}
+      {question.whyAsking && (
+        <p className="text-xs text-gray-500">
+          <span className="text-gray-600">Why asking:</span> {question.whyAsking}
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ─── Question card ─────────────────────────────────────────────────────────────
 
 function QuestionCard({
   question, onAnswer, onSkip
@@ -345,6 +535,8 @@ function QuestionCard({
           )}
         </div>
       )}
+
+      <ProvenanceChip question={question} />
     </div>
   )
 }
