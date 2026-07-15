@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+﻿import { describe, expect, it } from 'vitest'
 import type {
   AppliedCalibrationState,
   ArtifactSection,
@@ -22,7 +22,7 @@ function session(): TargetIntake {
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     roleTitle: 'SI Business Analyst',
-    company: 'OIP Insurtech',
+    company: 'Reference Insurer Inc',
     domainIQInsights: { rawText: '', companyProfile: '', industrySignals: [], techStack: [], cultureSignals: [] },
     jobDescription: {
       fullText: '',
@@ -57,15 +57,15 @@ function session(): TargetIntake {
 function profile(): UserProfile {
   return {
     id: 'profile-1',
-    fullName: 'Kumar Test',
-    email: 'kumar@example.com',
+    fullName: 'Test User',
+    email: 'testuser@example.com',
     phone: '555-0100',
     location: '',
     linkedIn: '',
     summary: 'Broad Product Owner / Business Systems Analyst positioning.',
     workHistory: [{
       id: 'work-1',
-      company: 'Paylocity',
+      company: 'SaaS Co',
       title: 'Product Analyst',
       startDate: '2020',
       endDate: '2023',
@@ -92,7 +92,7 @@ function bridgeQuestions(): BridgeQuestion[] {
       question: 'Describe Postman API work.',
       type: 'evidence',
       priority: 'high',
-      affectedArtifactSection: 'experience-qa',
+      affectedArtifactSection: 'experience-supporting',
       status: 'answered',
       userAnswer: 'I used Postman to validate API endpoints, not author specifications.',
       createdAt: '2026-01-01T00:00:00.000Z'
@@ -103,7 +103,7 @@ function bridgeQuestions(): BridgeQuestion[] {
       question: 'Do you have insurance coverages experience?',
       type: 'domain-translation',
       priority: 'high',
-      affectedArtifactSection: 'experience-ba',
+      affectedArtifactSection: 'experience-secondary',
       status: 'answered',
       userAnswer: 'I am not sure and do not have direct insurance billing experience.',
       createdAt: '2026-01-01T00:00:00.000Z'
@@ -146,7 +146,7 @@ function artifactSections(): ArtifactSection[] {
   return [
     section('summary', { content: 'SI BA alignment anchored on requirements translation.' }),
     section('skills', { content: 'Analysis: Requirements, Gap Analysis\nData: SQL, Pendo' }),
-    section('experience-ba', {
+    section('experience-secondary', {
       bullets: [
         bullet('Translated support signals into requirements and gap-analysis priorities.'),
         bullet('Needs confirmation claim.', { partition: 'needs-confirmation' })
@@ -164,18 +164,18 @@ function artifactSections(): ArtifactSection[] {
         }]
       },
       blockedClaimDiagnostics: [{
-        attemptedSection: 'experience-ba',
+        attemptedSection: 'experience-secondary',
         blockedClaimText: 'Calendar Platform ownership.',
-        detectedSourceEntry: 'Product Owner at Paylocity',
+        detectedSourceEntry: 'Product Owner at SaaS Co',
         detectedSourceRole: 'PO',
         reason: 'Wrong role section.',
-        suggestedSection: 'experience-po',
+        suggestedSection: 'experience-primary',
         disposition: 'downgraded'
       }],
       evidenceWarnings: ['Unsupported insurance domain should remain a gap.']
     }),
-    section('experience-po', { bullets: [bullet('Owned backlog sequencing.')] }),
-    section('experience-qa', { bullets: [bullet('Used QA experience for UAT readiness.')] })
+    section('experience-primary', { bullets: [bullet('Owned backlog sequencing.')] }),
+    section('experience-supporting', { bullets: [bullet('Used QA experience for UAT readiness.')] })
   ]
 }
 
@@ -226,7 +226,7 @@ function stage4(): Stage4RawResumeText {
 
 function storedSignals(): LearningSignal[] {
   return [
-    // accepted-bullet is no longer a valid LearningSignalType — it lives in artifactHistory.
+    // accepted-bullet is no longer a valid LearningSignalType â€” it lives in artifactHistory.
     // Only negative generation constraints and reusable rules belong in storedSignals.
     {
       id: 'sig-2',
@@ -252,7 +252,7 @@ function report() {
 }
 
 describe('Stage 5 session learning redesign', () => {
-  it('accepted bullets are not present in learning signals at all — they live in artifact history', () => {
+  it('accepted bullets are not present in learning signals at all â€” they live in artifact history', () => {
     const built = report()
     const primary = primaryLearningSignals(built)
     // No signal type resembles raw resume content
@@ -301,9 +301,9 @@ describe('Stage 5 session learning redesign', () => {
   })
 
   it('global signals are anonymized and do not include raw resume facts or user identity', () => {
-    const global = sanitizeGlobalLearning('Kumar Test at Paylocity improved 3,000+ support signals.', { profile: profile() })
-    expect(global).not.toContain('Kumar')
-    expect(global).not.toContain('Paylocity')
+    const global = sanitizeGlobalLearning('Test User at SaaS Co improved 3,000+ support signals.', { profile: profile() })
+    expect(global).not.toContain('Test User')
+    expect(global).not.toContain('SaaS Co')
     expect(global).not.toContain('3,000')
   })
 
@@ -356,7 +356,7 @@ describe('Stage 5 session learning redesign', () => {
     expect(built.strategySummary).toContain('Resume Builder shifted')
   })
 
-  it('artifactFactsFromSignals only reads rejected phrases — bullets are no longer in learningSignals', () => {
+  it('artifactFactsFromSignals only reads rejected phrases â€” bullets are no longer in learningSignals', () => {
     const facts = artifactFactsFromSignals(storedSignals())
     // acceptedBullets field no longer exists on the return value; only rejectedPhrases
     expect(facts.rejectedPhrases).toEqual(['leverage synergies'])
@@ -369,3 +369,4 @@ describe('Stage 5 session learning redesign', () => {
     expect(derived.some(s => s.content.includes('Prioritize this section in future artifact generation'))).toBe(true)
   })
 })
+

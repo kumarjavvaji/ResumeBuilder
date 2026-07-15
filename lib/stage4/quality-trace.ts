@@ -108,12 +108,12 @@ function buildBlueprintTrace(contract?: ResumeGenerationContract): Stage4Bluepri
   const sp = contract.sectionPlan
   return {
     built: true,
-    sectionKeys: ['summary', 'skills', 'experience-po', 'experience-ba', 'experience-qa', 'education'],
-    primaryProofSections: ['experience-po'],
-    secondaryProofSections: ['experience-ba', 'experience-qa'],
+    sectionKeys: ['summary', 'skills', 'experience-primary', 'experience-secondary', 'experience-supporting', 'education'],
+    primaryProofSections: ['experience-primary'],
+    secondaryProofSections: ['experience-secondary', 'experience-supporting'],
     supportingSections: ['summary', 'skills', 'education'],
     bulletIntentCount:
-      sp.productOwner.minBullets + sp.productAnalyst.minBullets + sp.qa.minBullets,
+      sp.primaryRole.minBullets + sp.secondaryRole.minBullets + sp.supportingRole.minBullets,
     evidenceRoutingCount: Object.keys(contract.evidenceRouting).length,
   }
 }

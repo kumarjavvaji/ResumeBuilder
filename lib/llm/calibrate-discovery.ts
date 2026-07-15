@@ -9,6 +9,7 @@ export interface DiscoveryOpts {
   targetCompany: string
   roleTitle: string
   jdSummary?: string
+  jdText?: string
   type: DiscoveryType
   signal?: AbortSignal
 }
@@ -18,32 +19,37 @@ export interface DiscoveryResult {
   diagnostics: CalibrationDiagnostic[]
 }
 
-// ─── Structured output tool ───────────────────────────────────────────────────
+// ─── Tool schema ──────────────────────────────────────────────────────────────
 
 const SUBMIT_TOOL = {
   name: 'submit_discovery_candidates',
-  description: 'Submit the discovered candidates. Call this immediately once you have found up to 5 candidates — do not wait for more searches.',
+  description: 'Submit discovered calibration sources. Call once you have gathered up to 5 — stop searching after that.',
   input_schema: {
     type: 'object' as const,
     required: ['candidates', 'diagnostics'],
     properties: {
       candidates: {
         type: 'array',
-        description: 'Up to 5 candidates found.',
+        description: 'Up to 5 sources. Include ONLY sources with genuine JD alignment. Return fewer if fewer qualify.',
         items: {
           type: 'object',
-          required: ['title', 'company', 'discoverySnippet', 'roughMatchReason', 'candidateMatchType', 'initialConfidence'],
+          required: ['title', 'company', 'discoverySnippet', 'roughMatchReason', 'candidateMatchType', 'initialConfidence', 'sourceKind'],
           properties: {
-            title: { type: 'string' },
+            title: { type: 'string', description: 'Job title, JD title, or page label.' },
             company: { type: 'string' },
             sourceUrl: { type: 'string' },
-            discoverySnippet: { type: 'string', description: 'Use the search snippet exactly — do not fabricate.' },
-            roughMatchReason: { type: 'string', description: 'One sentence: why this person/profile is relevant.' },
+            discoverySnippet: { type: 'string', description: 'Use the search snippet exactly — do not fabricate details.' },
+            roughMatchReason: { type: 'string', description: 'One sentence: which specific JD elements this source aligns with.' },
             candidateMatchType: {
               type: 'string',
               enum: ['target_company', 'competitor', 'adjacent_employer']
             },
-            initialConfidence: { type: 'string', enum: ['high', 'medium', 'low'] }
+            initialConfidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+            sourceKind: {
+              type: 'string',
+              enum: ['person_profile', 'comparable_jd', 'company_page', 'competitor_jd', 'other'],
+              description: 'What type of source this is.'
+            }
           }
         }
       },
@@ -66,42 +72,79 @@ const SUBMIT_TOOL = {
 // ─── Prompts ──────────────────────────────────────────────────────────────────
 
 function buildSystemPrompt(type: DiscoveryType, targetCompany: string, roleTitle: string): string {
-  const intro = type === 'target'
-    ? `Find up to 5 people currently working at ${targetCompany} whose role is similar to or adjacent to "${roleTitle}". Include implementation, systems, business analysis, recruiting, or hiring-adjacent roles.`
-    : `Find up to 5 people at companies that are competitors or adjacent employers to ${targetCompany} who have roles similar to "${roleTitle}". Look at insurtech, healthtech, or other relevant employers in the same industry.`
+  const scopeIntro = type === 'target'
+    ? `Find up to 5 calibration sources AT ${targetCompany} for the role "${roleTitle}".`
+    : `Find up to 5 calibration sources at COMPETITORS or ADJACENT companies (not ${targetCompany}) for the role "${roleTitle}".`
 
-  return `You are a calibration reference discovery agent.
+  return `You are a calibration reference discovery agent for job application strategy.
 
-${intro}
+${scopeIntro}
 
-RULES:
+PRIMARY RULE — a source is useful ONLY if it helps answer:
+"Would this source help us write a resume that sounds like a credible candidate for this exact JD?"
+
+SOURCE TYPES (in priority order):
+1. Same/near-peer seniority people profiles — same title family, same function, same domain
+2. Comparable job descriptions from the same or a competitor company — when profiles are shallow
+3. Company pages — ONLY when they explain the exact product/domain/problem space of the JD, not general about pages
+
+PREFER sources that match MULTIPLE JD dimensions:
+- Same or close title family (not just same company)
+- Believable target seniority (not far above)
+- Same product, domain, or problem space
+- Same systems, tools, workflows, or processes named in the JD
+- Language likely used by candidates hired for this role
+
+HARD REJECTION — do NOT include sources that:
+- Share only one or two keywords with the JD
+- Match the company name but not the role or function
+- Are director/VP/executive for an IC or manager-level role
+- Are sales, account management, or customer success unless the JD is explicitly commercial
+- Contain only a title with no usable responsibilities, tools, domain, or work description
+- Are too generic ("digital transformation leader", "strategy executive") with no concrete role content
+
+QUANTITY RULE:
+Return FEWER than 5 if fewer than 5 sources genuinely qualify.
+Do NOT fill the list with weak, senior, or loosely adjacent sources to reach 5.
+A detailed comparable JD is better than 3 shallow LinkedIn snippets.
+
+EXECUTION:
 - Run 1–2 targeted searches.
-- Use only the search snippets. Do NOT fabricate profile details.
+- Use only the search snippets — do NOT fabricate profile details.
 - If a page is gated (LinkedIn login wall), use the snippet shown in search results and mark confidence: "low".
-- Call submit_discovery_candidates as soon as you have found up to 5 candidates — stop searching after that.
-- If searches return nothing useful, call submit_discovery_candidates with empty candidates and a diagnostic.
+- Call submit_discovery_candidates once you have found up to 5 qualifying candidates.
 - Do not perform more than 3 web searches total.`
 }
 
 function buildUserPrompt(opts: DiscoveryOpts): string {
-  const { type, targetCompany, roleTitle, jdSummary } = opts
+  const { type, targetCompany, roleTitle, jdSummary, jdText } = opts
+
   const lines = [
     type === 'target'
-      ? `Discover calibration references at: ${targetCompany}`
-      : `Discover calibration references at competitors / adjacent employers (not ${targetCompany})`,
+      ? `Find calibration sources at: ${targetCompany}`
+      : `Find calibration sources at competitors / adjacent employers (not ${targetCompany})`,
     `Target role: ${roleTitle}`,
-    jdSummary ? `Context: ${jdSummary.slice(0, 300)}` : '',
     '',
-    `Search and call submit_discovery_candidates when done.`
-  ].filter(Boolean)
-  return lines.join('\n')
+  ]
+
+  // Pass full JD text if available (capped to avoid token waste), otherwise summary
+  const jdContent = jdText?.trim()
+    ? `Job description (use to judge alignment):\n${jdText.slice(0, 1200)}`
+    : jdSummary
+    ? `JD context: ${jdSummary.slice(0, 500)}`
+    : ''
+
+  if (jdContent) lines.push(jdContent, '')
+
+  lines.push(`Search and call submit_discovery_candidates with qualifying sources.`)
+
+  return lines.filter(l => l !== undefined).join('\n')
 }
 
 // ─── Agentic discovery loop ───────────────────────────────────────────────────
 
 export async function runDiscovery(opts: DiscoveryOpts): Promise<DiscoveryResult> {
   const { sessionId, signal } = opts
-
   const now = new Date().toISOString()
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -137,7 +180,7 @@ export async function runDiscovery(opts: DiscoveryOpts): Promise<DiscoveryResult
         system: buildSystemPrompt(opts.type, opts.targetCompany, opts.roleTitle),
         messages
       }, { signal })
-    } catch (err) {
+    } catch {
       // Fall back to non-web-search call
       try {
         response = await (anthropic.messages.create as Function)({
@@ -161,7 +204,6 @@ export async function runDiscovery(opts: DiscoveryOpts): Promise<DiscoveryResult
     if (response.stop_reason === 'tool_use') {
       const toolUseBlocks = response.content.filter(b => b.type === 'tool_use')
 
-      // Our submit tool was called
       const submitBlock = toolUseBlocks.find(b => b.name === 'submit_discovery_candidates')
       if (submitBlock) {
         return parseSubmitResult(submitBlock.input as SubmitInput, sessionId, opts.type, now)
@@ -193,6 +235,7 @@ interface RawCandidate {
   roughMatchReason?: string
   candidateMatchType?: CalibrationMatchType
   initialConfidence?: 'high' | 'medium' | 'low'
+  sourceKind?: string
 }
 
 interface SubmitInput {

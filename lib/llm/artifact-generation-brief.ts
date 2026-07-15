@@ -109,26 +109,38 @@ export function detectRoleFamily(
   const title = roleTitle.toLowerCase()
   const jdText = jdMap.required.map(r => r.text.toLowerCase()).join(' ')
 
-  // Explicit data emphasis always → product analytics
-  if (emphasis === 'data') return 'product-analytics'
+  const emphasisLower = emphasis.toLowerCase()
 
-  // AI/ML roles
-  if (emphasis === 'AI' || /\bai\b|machine learning|ml\b/i.test(title)) return 'ai'
+  // AI/ML roles — title or emphasis signal
+  if (/\bai\b|machine learning|ml\b/i.test(title) || emphasisLower.includes('ai') || emphasisLower.includes('machine learning')) return 'ai'
 
   // Analytics / reporting / insights in title → product analytics
   if (/analyt|insight|reporting|metrics?\b|kpi|dashboard/i.test(title)) return 'product-analytics'
 
-  // BA with analytics-heavy JD
-  if (emphasis === 'BA') {
+  // Data emphasis or data-focused roles
+  if (emphasisLower === 'data' || emphasisLower.includes('data analyst')) {
+    return 'product-analytics'
+  }
+
+  // Business / product analyst with analytics-heavy JD
+  if (/analyst/i.test(title) || emphasisLower.includes('analyst')) {
     const analyticsKeywords = ['dashboard', 'kpi', 'sql', 'reporting', 'analytics', 'data validation', 'opportunity sizing', 'metrics', 'data quality']
     const hitCount = analyticsKeywords.filter(k => jdText.includes(k)).length
     if (hitCount >= 2) return 'product-analytics'
     return 'business-analyst'
   }
 
-  if (emphasis === 'PO') return 'product-owner'
-  if (emphasis === 'QA') return 'quality'
-  if (emphasis === 'operations') return 'operations'
+  // QA / quality roles
+  if (/\bqa\b|quality assurance|quality analyst|test engineer|tester/i.test(title) || emphasisLower.includes('supporting') || emphasisLower.includes('quality')) return 'quality'
+
+  // Operations roles
+  if (/operations?|ops\b/i.test(title) || emphasisLower === 'operations') return 'operations'
+
+  // Product owner / product manager
+  if (/product owner|product manager|program manager|scrum master/i.test(title)) return 'product-owner'
+
+  // Blended or unrecognized — try emphasis as a generic label
+  if (emphasisLower && emphasisLower !== 'blended') return emphasisLower.replace(/\s+/g, '-')
 
   return 'generic'
 }
@@ -261,9 +273,9 @@ export function deriveEvaluatorLens(
 const ARTIFACT_TYPE_LABELS: Record<SectionType, string> = {
   summary: 'Professional Summary',
   skills: 'Skills Section',
-  'experience-po': 'Experience — Product Owner',
-  'experience-ba': 'Experience — Business Analyst / Product Analyst',
-  'experience-qa': 'Experience — QA / Quality',
+  'experience-primary': 'Experience — Product Owner',
+  'experience-secondary': 'Experience — Business Analyst / Product Analyst',
+  'experience-supporting': 'Experience — QA / Quality',
   'cover-letter': 'Cover Letter',
   'referral-message': 'Referral Message',
   'recruiter-message': 'Recruiter Message',
@@ -310,7 +322,7 @@ function deriveArtifactStrategy(
           '"early career includes"',
           '"grounding operational context"',
           '"grounding data pipeline context"',
-          'GAINSystems (exclude unless JD requires supply chain/CPG/operations domain)',
+          'older employers not relevant to this JD',
           '"With a decade of..."',
           '"Background includes..."',
           ...unsupportedGaps.slice(0, 3),
@@ -332,7 +344,7 @@ function deriveArtifactStrategy(
       }
     }
 
-    case 'experience-po': {
+    case 'experience-primary': {
       const isAnalytics = roleFamily === 'product-analytics'
       return {
         purpose: isAnalytics
@@ -351,7 +363,7 @@ function deriveArtifactStrategy(
       }
     }
 
-    case 'experience-ba': {
+    case 'experience-secondary': {
       const isAnalytics = roleFamily === 'product-analytics'
       return {
         purpose: isAnalytics
@@ -378,7 +390,7 @@ function deriveArtifactStrategy(
       }
     }
 
-    case 'experience-qa': {
+    case 'experience-supporting': {
       const isAnalytics = roleFamily === 'product-analytics'
       return {
         purpose: isAnalytics

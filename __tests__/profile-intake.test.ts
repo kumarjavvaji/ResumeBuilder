@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Tests for the profile intake pipeline.
  *
  * Coverage:
@@ -246,7 +246,7 @@ describe('projectSnapshot', () => {
 
   it('experience section includes all active claims', () => {
     const snapshot = makeSnapshot()
-    const projection = projectSnapshot(snapshot, { sectionType: 'experience-po' })
+    const projection = projectSnapshot(snapshot, { sectionType: 'experience-primary' })
     // experience sections allow weak evidence too
     const allActiveCount = snapshot.dimensions.experienceClaims.filter(c => c.status === 'active').length
     expect(projection.relevantClaims.length).toBeGreaterThanOrEqual(0)
@@ -259,7 +259,7 @@ describe('projectSnapshot', () => {
         makeClaim({ claimId: nanoid(), normalizedKey: `claim ${i}`, evidenceStrength: 'strong', category: 'achievement' })
       ),
     })
-    const projection = projectSnapshot(snapshot, { sectionType: 'experience-po', maxClaims: 10 })
+    const projection = projectSnapshot(snapshot, { sectionType: 'experience-primary', maxClaims: 10 })
     expect(projection.relevantClaims.length).toBeLessThanOrEqual(10)
   })
 

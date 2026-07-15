@@ -89,7 +89,7 @@ function makeInput(overrides: Partial<ContractBuildInput> = {}): ContractBuildIn
 
 function makeReadinessContract(overrides: Partial<ResumeReadinessContract> = {}): ResumeReadinessContract {
   return {
-    targetRoleFamily: 'product_owner',
+    targetRoleFamily: 'primary',
     targetPosture: 'product delivery',
     sectionPlan: {
       summary: { purpose: 'positioning', maxSentences: 4, maxApproxLines: 4 },

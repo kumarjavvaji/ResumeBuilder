@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Targeted tests for the LLM-backed artifact refinement path.
  *
  * Tests:
@@ -267,7 +267,7 @@ describe('learning signals from accepted refinement', () => {
       type: 'jd_alignment_strategy',
       scope: 'user_specific',
       signal: 'For BA resumes targeting credit-union roles, translate stakeholder alignment into gap analysis and release readiness framing.',
-      appliesTo: ['experience-ba', 'summary'],
+      appliesTo: ['experience-secondary', 'summary'],
     }
     const version = makeArtifactVersion({ learningSignals: [sig] })
     const section = makeSection({ versions: [version] })

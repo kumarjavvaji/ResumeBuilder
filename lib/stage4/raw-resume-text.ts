@@ -8,6 +8,7 @@ import type {
   Stage4ExperienceBlock,
   Stage4RawResumeSections,
   Stage4RawResumeText,
+  Stage4Section,
   Stage4SourceArtifactSnapshot,
   Stage4StructureSource,
   UserProfile,
@@ -21,9 +22,9 @@ import { buildStage4QualityTrace } from './quality-trace'
 export const REQUIRED_RESUME_SECTION_TYPES: SectionType[] = [
   'summary',
   'skills',
-  'experience-po',
-  'experience-ba',
-  'experience-qa'
+  'experience-primary',
+  'experience-secondary',
+  'experience-supporting'
 ]
 
 const OPTIONAL_ARTIFACT_TYPES = new Set<SectionType>([
@@ -37,9 +38,9 @@ const OPTIONAL_ARTIFACT_TYPES = new Set<SectionType>([
 const SECTION_LABELS: Record<SectionType, string> = {
   summary: 'Professional Summary',
   skills: 'Skills',
-  'experience-po': 'Experience: Product Owner',
-  'experience-ba': 'Experience: Business Analyst',
-  'experience-qa': 'Experience: QA / Quality',
+  'experience-primary': 'Experience: Product Owner',
+  'experience-secondary': 'Experience: Business Analyst',
+  'experience-supporting': 'Experience: QA / Quality',
   'cover-letter': 'Cover Letter',
   'referral-message': 'Referral Message',
   'recruiter-message': 'Recruiter Message',
@@ -163,6 +164,7 @@ export function buildStage4RawResumeText(opts: BuildStage4RawResumeTextOptions):
     sourceArtifactSnapshots: sourceArtifacts.map(snapshotSourceArtifact),
     structureSource: opts.structureSource ?? inferStructureSource(opts.profile),
     sections: assembled,
+    sectionBlocks: buildSectionBlocks(assembled, eligible),
     warnings,
     staleReasons: [],
     contract: opts.contract,
@@ -260,7 +262,7 @@ function buildExperienceBlocks(
     blocks.push(workEntryToBlock(work, bullets, source.id))
   }
 
-  for (const sectionType of ['experience-po', 'experience-ba', 'experience-qa'] as SectionType[]) {
+  for (const sectionType of ['experience-primary', 'experience-secondary', 'experience-supporting'] as SectionType[]) {
     const source = byType.get(sectionType)
     if (!source) continue
     const alreadyUsed = blocks.some(b => b.sourceArtifactSectionId === source.id)
@@ -289,9 +291,9 @@ function buildExperienceBlocks(
 
 function sectionTypeForWorkEntry(work: WorkEntry): SectionType | null {
   const text = `${work.title} ${work.company} ${work.domain}`.toLowerCase()
-  if (/\b(product owner|po)\b/.test(text)) return 'experience-po'
-  if (/\b(qa|quality|test|automation)\b/.test(text)) return 'experience-qa'
-  if (/\b(business analyst|product analyst|analyst|ba)\b/.test(text)) return 'experience-ba'
+  if (/\b(product owner|po)\b/.test(text)) return 'experience-primary'
+  if (/\b(qa|quality|test|automation)\b/.test(text)) return 'experience-supporting'
+  if (/\b(business analyst|product analyst|analyst|ba)\b/.test(text)) return 'experience-secondary'
   return null
 }
 
@@ -331,6 +333,102 @@ function buildEducationText(profile: UserProfile): string {
     .map(e => [e.degree, e.field, e.institution, e.graduationYear].filter(Boolean).join(' | '))
   const certs = profile.certifications ?? []
   return [...education, ...certs].filter(Boolean).join('\n')
+}
+
+/** Compile the full resume text from sectionBlocks in document order. */
+export function compiledFullText(sectionBlocks: Stage4Section[]): string {
+  const sorted = [...sectionBlocks].sort((a, b) => a.order - b.order)
+  const parts: string[] = []
+  for (const block of sorted) {
+    const text = block.acceptedText.trim()
+    if (!text) continue
+    const header = SECTION_BLOCK_HEADER[block.sectionType]
+    if (header) {
+      parts.push(`${header}\n${text}`)
+    } else {
+      parts.push(text)
+    }
+  }
+  return parts.join('\n\n')
+}
+
+/** Header labels for the compiled full resume. Only top-level sections get headers. */
+const SECTION_BLOCK_HEADER: Record<string, string | undefined> = {
+  summary: 'SUMMARY',
+  skills: 'SKILLS',
+  education: 'EDUCATION',
+  // experience blocks are grouped under EXPERIENCE by the compiler in compiledFullTextWithHeaders
+}
+
+/**
+ * Builds the Stage4Section[] document spine from assembled sections.
+ * Experience types that have no content are omitted.
+ */
+export function buildSectionBlocks(
+  sections: Stage4RawResumeSections,
+  artifactSections: ArtifactSection[],
+): Stage4Section[] {
+  const blocks: Stage4Section[] = []
+  let order = 0
+
+  if (sections.summary.trim()) {
+    const src = artifactSections.find(s => s.type === 'summary')
+    blocks.push({
+      sectionId: 'summary',
+      sectionType: 'summary',
+      order: order++,
+      acceptedText: sections.summary,
+      status: 'accepted',
+      evidenceMappings: src?.sourceMappings ?? [],
+      warnings: src?.evidenceWarnings ?? [],
+    })
+  }
+
+  if (sections.skills.trim()) {
+    const src = artifactSections.find(s => s.type === 'skills')
+    blocks.push({
+      sectionId: 'skills',
+      sectionType: 'skills',
+      order: order++,
+      acceptedText: sections.skills,
+      status: 'accepted',
+      evidenceMappings: src?.sourceMappings ?? [],
+      warnings: src?.evidenceWarnings ?? [],
+    })
+  }
+
+  for (const expType of ['experience-primary', 'experience-secondary', 'experience-supporting'] as SectionType[]) {
+    const src = artifactSections.find(s => s.type === expType)
+    const blocks_ = src
+      ? sections.experiences.filter(b => b.sourceArtifactSectionId === src.id)
+      : []
+    if (blocks_.length === 0) continue
+    const text = blocks_.map(formatExperienceBlock).join('\n\n')
+    if (!text.trim()) continue
+    blocks.push({
+      sectionId: expType,
+      sectionType: expType,
+      order: order++,
+      acceptedText: text,
+      status: 'accepted',
+      evidenceMappings: src?.sourceMappings ?? [],
+      warnings: src?.evidenceWarnings ?? [],
+    })
+  }
+
+  if (sections.education.trim()) {
+    blocks.push({
+      sectionId: 'education',
+      sectionType: 'education',
+      order: order++,
+      acceptedText: sections.education,
+      status: 'accepted',
+      evidenceMappings: [],
+      warnings: [],
+    })
+  }
+
+  return blocks
 }
 
 function assembleSections(parts: Omit<Stage4RawResumeSections, 'fullText'>): Stage4RawResumeSections {

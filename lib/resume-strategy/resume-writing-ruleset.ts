@@ -3,10 +3,10 @@ import type { ResumeWritingRuleset } from '@/contracts'
 const SCRUM_ALLIANCE_SOURCE_ID = 'scrum-alliance-product-owner-resume-guidance'
 
 const PRODUCT_ADJACENT_ROLE_FAMILIES = [
-  'product_owner',
-  'product_analyst',
-  'associate_pm',
-  'business_analyst',
+  'primary',
+  'secondary',
+  'primary',
+  'secondary',
   'it_product',
 ]
 

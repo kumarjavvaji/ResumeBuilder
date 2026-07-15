@@ -345,7 +345,7 @@ function buildWhy(session: TargetIntake, applied: AppliedCalibrationState | unde
 }
 
 function inferFinalFocus(accepted: ArtifactSection[]): string {
-  const ba = accepted.find(s => s.type === 'experience-ba')
+  const ba = accepted.find(s => s.type === 'experience-secondary')
   const summary = accepted.find(s => s.type === 'summary')
   const source = ba?.bullets?.[0]?.text || summary?.content || ''
   return source ? summarize(source, 150) : ''

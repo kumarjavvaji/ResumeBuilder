@@ -86,9 +86,9 @@ function ProvenanceLine({ provenance, currentCalibrationStateId }: {
 }
 
 const SECTION_LABELS: Partial<Record<SectionType, string>> = {
-  'experience-po': 'Experience (Product Owner)',
-  'experience-ba': 'Experience (Business Analyst)',
-  'experience-qa': 'Experience (QA / Quality)',
+  'experience-primary': 'Experience (Product Owner)',
+  'experience-secondary': 'Experience (Business Analyst)',
+  'experience-supporting': 'Experience (QA / Quality)',
   summary: 'Professional Summary',
   skills: 'Skills',
 }

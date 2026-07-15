@@ -1,6 +1,6 @@
-/**
+﻿/**
  * Calibration persistence and artifact provenance tests.
- * All tests use pure logic and in-memory implementations — no IndexedDB, no LLM calls.
+ * All tests use pure logic and in-memory implementations â€” no IndexedDB, no LLM calls.
  *
  * Coverage:
  * 1.  Discovery candidates persist immediately after discovery
@@ -23,7 +23,7 @@
  * 18. 4/5 partial calibration can be applied and used in artifact generation
  * 19. Artifact provenance does not contain matchReason text as pattern labels
  * 20. Artifact provenance does not contain person names in pattern labels
- * 21. Artifact provenance pattern labels are short (≤ 40 chars each)
+ * 21. Artifact provenance pattern labels are short (â‰¤ 40 chars each)
  * 22. Artifact provenance truncates to MAX_VISIBLE patterns with +N more
  * 23. referencedCalibrationIds in provenance separate from appliedCalibrationPatterns
  * 24. buildPartialSummary produces empty calibrationPatterns (no raw matchReason pollution)
@@ -48,7 +48,7 @@ import type {
 } from '@/contracts'
 import { nanoid } from '@/lib/storage/nanoid'
 
-// ─── Fixtures ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Fixtures â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function makeCandidate(overrides: Partial<CalibrationCandidate> = {}): CalibrationCandidate {
   return {
@@ -57,7 +57,7 @@ function makeCandidate(overrides: Partial<CalibrationCandidate> = {}): Calibrati
     status: 'queued',
     candidateMatchType: 'target_company',
     title: 'Business Analyst',
-    company: 'OIP Insurtech',
+    company: 'Reference Insurer Inc',
     discoverySnippet: 'BA with insurance domain experience.',
     roughMatchReason: 'Matches target role profile.',
     initialConfidence: 'medium',
@@ -91,7 +91,7 @@ function makeRef(overrides: Partial<CalibrationReference> = {}): CalibrationRefe
     sessionId: 'sess-1',
     sourceType: 'search_result',
     title: 'Implementation Analyst',
-    company: 'OIP Insurtech',
+    company: 'Reference Insurer Inc',
     snippetOrSummary: 'Works on systems integration.',
     matchReason: 'Target company employee in adjacent role.',
     matchType: 'target_company',
@@ -178,7 +178,7 @@ function isStaleProvenance(
   return provenance.calibrationStateId !== currentStateId
 }
 
-// ─── 1–3: Discovery and enrichment persistence ────────────────────────────────
+// â”€â”€â”€ 1â€“3: Discovery and enrichment persistence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('discovery and enrichment state', () => {
   it('(1) queued candidates have correct initial status after discovery', () => {
@@ -216,10 +216,10 @@ describe('discovery and enrichment state', () => {
   })
 })
 
-// ─── 4–7: Applied calibration state ──────────────────────────────────────────
+// â”€â”€â”€ 4â€“7: Applied calibration state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('applied calibration state', () => {
-  it('(4) applied state built correctly from refs — includes counts and patterns', () => {
+  it('(4) applied state built correctly from refs â€” includes counts and patterns', () => {
     const refs = [
       ...Array.from({ length: 4 }, () => makeRef({ matchType: 'target_company' })),
       ...Array.from({ length: 4 }, () => makeRef({ matchType: 'competitor' }))
@@ -245,7 +245,7 @@ describe('applied calibration state', () => {
     expect(deserialized.targetReferenceCount).toBe(3)
   })
 
-  it('(6) 4/5 target + 4/5 comparable → applied_partial', () => {
+  it('(6) 4/5 target + 4/5 comparable â†’ applied_partial', () => {
     const refs = [
       ...Array.from({ length: 4 }, () => makeRef({ matchType: 'target_company' })),
       ...Array.from({ length: 4 }, () => makeRef({ matchType: 'competitor' }))
@@ -258,7 +258,7 @@ describe('applied calibration state', () => {
     expect(state.isPartial).toBe(true)
   })
 
-  it('(7) 5/5 target + 5/5 comparable → applied_full', () => {
+  it('(7) 5/5 target + 5/5 comparable â†’ applied_full', () => {
     const refs = [
       ...Array.from({ length: 5 }, () => makeRef({ matchType: 'target_company' })),
       ...Array.from({ length: 5 }, () => makeRef({ matchType: 'competitor' }))
@@ -271,7 +271,7 @@ describe('applied calibration state', () => {
   })
 })
 
-// ─── 8–10: Artifact generation provenance ────────────────────────────────────
+// â”€â”€â”€ 8â€“10: Artifact generation provenance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('artifact generation provenance', () => {
   it('(8) provenance records calibration state ID when calibration is applied', () => {
@@ -316,7 +316,7 @@ describe('artifact generation provenance', () => {
   })
 })
 
-// ─── 11–13: Artifact card stale detection ────────────────────────────────────
+// â”€â”€â”€ 11â€“13: Artifact card stale detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('artifact card provenance display logic', () => {
   it('(11) stale calibration detected when state IDs differ', () => {
@@ -341,7 +341,7 @@ describe('artifact card provenance display logic', () => {
     expect(isStaleProvenance(prov, nanoid())).toBe(false)
   })
 
-  it('calibration used but currentStateId undefined → not stale (user hasnt applied anything new)', () => {
+  it('calibration used but currentStateId undefined â†’ not stale (user hasnt applied anything new)', () => {
     const refs = Array.from({ length: 3 }, () => makeRef({ matchType: 'target_company' }))
     const applied = makeAppliedState(refs, true)
     const prov = buildProvenance('generate', applied)
@@ -350,7 +350,7 @@ describe('artifact card provenance display logic', () => {
   })
 })
 
-// ─── 14: Accepted sections protected ─────────────────────────────────────────
+// â”€â”€â”€ 14: Accepted sections protected â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('accepted section protection', () => {
   it('(14) accepted section guard prevents regeneration without explicit instruction', () => {
@@ -358,33 +358,33 @@ describe('accepted section protection', () => {
       status === 'accepted' && !refinementInstruction
 
     expect(guard('accepted')).toBe(true)                  // blocked
-    expect(guard('accepted', 'Rewrite section.')).toBe(false)  // explicit → allowed
+    expect(guard('accepted', 'Rewrite section.')).toBe(false)  // explicit â†’ allowed
     expect(guard('generated')).toBe(false)                // not accepted
     expect(guard('needs_review')).toBe(false)             // not accepted
   })
 })
 
-// ─── 15: Calibration refs as influence only ───────────────────────────────────
+// â”€â”€â”€ 15: Calibration refs as influence only â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('calibration refs as influence only', () => {
   it('(15) referencedCalibrationIds records ref IDs separately from evidenceRef (claim evidence)', () => {
     const refs = Array.from({ length: 3 }, () => makeRef())
     const state = makeAppliedState(refs, true)
 
-    // referencedCalibrationIds are market influence IDs — not claim evidence
+    // referencedCalibrationIds are market influence IDs â€” not claim evidence
     expect(state.referencedCalibrationIds).toHaveLength(3)
     expect(state.referencedCalibrationIds).toEqual(refs.map(r => r.id))
 
     // They should not appear as evidenceRef values in artifact bullets
     // (This is a contractual constraint tested structurally)
-    const evidenceRefs = ['Work at OIP (2021–2023)', 'Bridge: UAT experience'] // typical bullet evidenceRef
+    const evidenceRefs = ['Work at OIP (2021â€“2023)', 'Bridge: UAT experience'] // typical bullet evidenceRef
     for (const calibId of state.referencedCalibrationIds) {
       expect(evidenceRefs).not.toContain(calibId)
     }
   })
 })
 
-// ─── 16: Refresh marks state stale ───────────────────────────────────────────
+// â”€â”€â”€ 16: Refresh marks state stale â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('refresh after apply', () => {
   it('(16) refresh marks applied state as stale_after_refresh', () => {
@@ -404,10 +404,10 @@ describe('refresh after apply', () => {
   })
 })
 
-// ─── 17: Session delete clears all calibration ───────────────────────────────
+// â”€â”€â”€ 17: Session delete clears all calibration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('session delete', () => {
-  it('(17) session delete targets all calibration tables — verified by sessions.ts source', async () => {
+  it('(17) session delete targets all calibration tables â€” verified by sessions.ts source', async () => {
     const fs = await import('fs')
     const path = await import('path')
     const src = fs.readFileSync(path.resolve(__dirname, '../lib/storage/sessions.ts'), 'utf-8')
@@ -420,7 +420,7 @@ describe('session delete', () => {
   })
 })
 
-// ─── 19–26: Provenance pattern normalization ──────────────────────────────────
+// â”€â”€â”€ 19â€“26: Provenance pattern normalization â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('provenance pattern normalization', () => {
   const longMatchReason = 'CoverGo is an insurtech platform operating in the health insurance space, serving enterprise clients across Southeast Asia with configurable policy administration systems.'
@@ -451,7 +451,7 @@ describe('provenance pattern normalization', () => {
     expect(shortLabel).not.toMatch(/Jelena/)
   })
 
-  it('(21) pattern labels are short — each must be ≤ 40 characters', () => {
+  it('(21) pattern labels are short â€” each must be â‰¤ 40 characters', () => {
     const labels = [
       'Systems Integration', 'Requirements Elicitation', 'Insurance Domain Literacy',
       'Stakeholder Translation', 'Agile Delivery', 'Workflow Analysis', 'Platform Operations'
@@ -472,11 +472,11 @@ describe('provenance pattern normalization', () => {
 
     expect(result).toContain('Systems Integration')
     expect(result).toContain('+2 more')
-    expect(result).not.toContain('Stakeholder Translation')  // 5th — truncated
-    expect(result).not.toContain('Workflow Analysis')         // 6th — truncated
+    expect(result).not.toContain('Stakeholder Translation')  // 5th â€” truncated
+    expect(result).not.toContain('Workflow Analysis')         // 6th â€” truncated
   })
 
-  it('(22) provenance shows all patterns when ≤ 4 and no "+N more"', () => {
+  it('(22) provenance shows all patterns when â‰¤ 4 and no "+N more"', () => {
     const fewPatterns = ['Systems Integration', 'Agile Delivery', 'Workflow Analysis']
     const result = formatPatternProvenance(fewPatterns, 4)
 
@@ -484,7 +484,7 @@ describe('provenance pattern normalization', () => {
     expect(result).not.toContain('+')
   })
 
-  it('(22) empty patterns produce empty string — ref counts shown instead', () => {
+  it('(22) empty patterns produce empty string â€” ref counts shown instead', () => {
     const result = formatPatternProvenance([], 4)
     expect(result).toBe('')
   })
@@ -498,7 +498,7 @@ describe('provenance pattern normalization', () => {
     expect(prov.referencedCalibrationIds).toHaveLength(4)
     expect(prov.appliedCalibrationPatterns).toBeDefined()
 
-    // They are different arrays — IDs are not patterns and vice versa
+    // They are different arrays â€” IDs are not patterns and vice versa
     const ids = prov.referencedCalibrationIds!
     const patterns = prov.appliedCalibrationPatterns!
     for (const id of ids) {
@@ -506,14 +506,14 @@ describe('provenance pattern normalization', () => {
     }
   })
 
-  it('(24) buildPartialSummary calibrationPatterns are empty — verified via calibration-panel source', async () => {
+  it('(24) buildPartialSummary calibrationPatterns are empty â€” verified via calibration-panel source', async () => {
     const fs = await import('fs')
     const path = await import('path')
     const src = fs.readFileSync(
       path.resolve(__dirname, '../components/artifacts/calibration-panel.tsx'), 'utf-8'
     )
 
-    // buildPartialSummary must set calibrationPatterns to [] — not map matchReason
+    // buildPartialSummary must set calibrationPatterns to [] â€” not map matchReason
     const buildFnMatch = src.match(/function buildPartialSummary[\s\S]*?^}/m)
     expect(buildFnMatch).not.toBeNull()
     const fnBody = buildFnMatch![0]
@@ -544,7 +544,7 @@ describe('provenance pattern normalization', () => {
 
     // evidenceRef values point to profile entries, not calibration patterns
     const typicalEvidenceRefs = [
-      'Work at OIP Insurtech (2021–2023)',
+      'Work at Reference Insurer Inc (2021â€“2023)',
       'Bridge: UAT coordination experience',
       'Personal project: workflow mapping'
     ]
@@ -554,3 +554,4 @@ describe('provenance pattern normalization', () => {
     }
   })
 })
+

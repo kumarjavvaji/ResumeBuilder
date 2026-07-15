@@ -60,8 +60,8 @@ export interface RawJD {
 }
 
 /**
- * 7-type gap taxonomy for Stage 1 requirement coverage.
- * true_gap / profile_missing / parser_missing are meaningfully different action signals.
+ * 8-type gap taxonomy for Stage 1 requirement coverage.
+ * true_gap / profile_missing / retrieval_gap are meaningfully different action signals.
  */
 export type GapClassification =
   | 'true_gap'           // user genuinely lacks this; no adjacent evidence
@@ -71,9 +71,10 @@ export type GapClassification =
   | 'wording_gap'        // user has the substance but needs JD vocabulary
   | 'needs_confirmation' // bridge question can clarify coverage
   | 'not_required'       // nice-to-have — deprioritize in bridge questions
+  | 'retrieval_gap'      // system likely missed existing evidence; deterministic match contradicts LLM
 
 /** Calibrated fit classification for a Stage 1 artifact row — synthesized from JD + Quick-DIQ + profile. */
-export type CalibratedFitClassification = 'covered' | 'partial' | 'gap' | 'needs_evidence' | 'weakly_supported'
+export type CalibratedFitClassification = 'covered' | 'partially_covered' | 'partial' | 'gap' | 'needs_evidence' | 'weakly_supported' | 'retrieval_gap'
 
 export interface JDRequirement {
   text: string
@@ -111,6 +112,16 @@ export interface JDRequirement {
   matchedClaimIds?: string[]
   /** Strength of the matched profile evidence, derived deterministically from matchedClaimIds. */
   profileEvidenceStrength?: 'strong' | 'moderate' | 'weak' | 'none'
+  /** Human-readable text of top matched evidence items — for provenance display, not stored long-term. */
+  matchedEvidenceTexts?: string[]
+  /** Bridge assessment type produced by the Evidence Bridge LLM pass. */
+  bridgeAssessment?: 'direct' | 'adjacent' | 'proxy' | 'insufficient' | 'likely_retrieval_gap'
+  /** Confidence in the bridge assessment. */
+  bridgeConfidence?: 'high' | 'medium' | 'low'
+  /** Short reasoning string from the bridge LLM (≤25 words). */
+  bridgeReasoning?: string
+  /** How Stage 2 should handle this row. Derived deterministically from bridge assessment. */
+  stage2Action?: 'suppress' | 'ask_bridge_question' | 'retrieve_more_evidence'
 }
 
 export interface JDRequirementMap {
@@ -206,7 +217,8 @@ export interface CompanyIndustryBasis {
   }>
 }
 
-export type EmphasisCategory = 'PO' | 'BA' | 'QA' | 'AI' | 'data' | 'operations' | 'blended'
+/** Open string — callers derive emphasis from role title, JD, and profile (e.g. "Product Owner", "Data Scientist"). */
+export type EmphasisCategory = string
 
 export type StageKey = 'intake' | 'bridge' | 'artifacts' | 'export' | 'signals'
 export type StageStatus = 'pending' | 'active' | 'complete'
@@ -242,6 +254,8 @@ export interface TargetIntake {
   fitAnalysis?: FitAnalysis
   /** Session-wide refinement direction — applied as background strategy to all Stage 3B refine calls. */
   overallRefinementPrompt?: string
+  /** FK to Stage1Job.id — set when multi-pass pipeline completes for this session. */
+  stage1JobId?: string
   // Legacy single-stage flag kept for existing sessions
   status: 'intake' | 'bridge' | 'artifact' | 'export'
   // Per-stage status for sidebar nav
@@ -280,6 +294,8 @@ export interface FitRequirement {
   matchedClaimIds?: string[]
   /** Strength of the matched profile evidence, derived deterministically from matchedClaimIds. */
   profileEvidenceStrength?: 'strong' | 'moderate' | 'weak' | 'none'
+  /** Human-readable text of top matched evidence items — for provenance display. */
+  matchedEvidenceTexts?: string[]
 }
 
 /**
@@ -327,6 +343,25 @@ export interface FitAnalysis {
   findings?: Stage1Finding[]
   /** Quick-DIQ company/domain calibration used to generate this artifact, if available. */
   calibrationBrief?: Stage1CalibrationBrief
+  /** Structured risk/gap breakdown (F section of the A-I output contract). */
+  riskGapBreakdown?: {
+    trueCandidateGaps: string[]
+    weakButBridgeable: string[]
+    retrievalGaps: string[]
+  }
+  /** Resume positioning guidance from synthesis (H section of the A-I output contract). */
+  resumeDirection?: {
+    summaryGuidance: string
+    skillsGuidance: string
+    experienceBulletGuidance: string[]
+  }
+  /** Self-audit of what the Stage 1 system did or caught (I section of the A-I output contract). */
+  qualityAudit?: {
+    compoundRequirementsSplit: string[]
+    contradictionsResolved: string[]
+    retrievalGapsFlagged: string[]
+    stage2QuestionsSuppressed: string[]
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -374,7 +409,7 @@ export interface Stage1Finding {
   id: string
   topic: string
   findingText: string
-  coverageStatus?: 'covered' | 'partial' | 'gap' | 'needs_evidence' | 'weakly_supported' | 'context_only'
+  coverageStatus?: 'covered' | 'partially_covered' | 'partial' | 'gap' | 'needs_evidence' | 'weakly_supported' | 'context_only' | 'retrieval_gap'
   sourceTrace: Stage1SourceTrace[]
   downstreamPermission: Stage1DownstreamPermission
 }
@@ -458,9 +493,26 @@ export type BridgeQuestionType =
   | 'emphasis'
   | 'underused-experience'
 
+/** How well the candidate's evidence covers a JD requirement. */
+export type BridgeEvidenceStatus = 'covered' | 'partial' | 'weak' | 'gap' | 'retrieval_gap'
+
 export interface BridgeQuestion {
   id: string
   sessionId: string
+  // ── Provenance (set for questions generated by the multi-pass pipeline) ──
+  /** Stage1Job.id that produced this question. Absent on legacy questions. */
+  stage1JobId?: string
+  /** djb2 hash of the jdText at generation time. Used for staleness detection. */
+  jdHash?: string
+  /** Requirement IDs (from GapFitEntry) that triggered this question. */
+  requirementIds?: string[]
+  /** Coverage state that motivated this question. */
+  evidenceStatus?: BridgeEvidenceStatus
+  /** Short label of the JD requirement this question targets (for UI). */
+  requirementLabel?: string
+  /** One-line reason this question was generated. */
+  whyAsking?: string
+  // ── Core fields ──
   question: string
   type: BridgeQuestionType
   priority: 'high' | 'medium' | 'low'
@@ -500,6 +552,19 @@ export interface CalibrationReference {
   confidence: 'high' | 'medium' | 'low'
   limitations?: string
   collectedAt: string
+  // JD-alignment grouping — assigned at enrichment time, gates Stage 3B usage
+  calibrationGroup?: 'primary' | 'supporting' | 'context_only' | 'rejected'
+  sourceDepth?: 'rich' | 'moderate' | 'shallow'
+  useFor?: string[]
+  doNotUseFor?: string[]
+  jdAlignmentElements?: string[]
+  riskNote?: string
+  rejectedReason?: string
+  // Manual enrichment — user-pasted public profile context (calibration only, not user evidence)
+  manualContext?: string
+  manualContextUpdatedAt?: string
+  referenceDepth?: 'snippet_only' | 'manual_enriched'
+  enrichmentSource?: 'user_pasted'
 }
 
 export interface CalibrationSummary {
@@ -678,9 +743,9 @@ export interface ResumeBullet {
 export type SectionType =
   | 'summary'
   | 'skills'
-  | 'experience-po'
-  | 'experience-ba'
-  | 'experience-qa'
+  | 'experience-primary'
+  | 'experience-secondary'
+  | 'experience-supporting'
   | 'cover-letter'
   | 'referral-message'
   | 'recruiter-message'
@@ -866,6 +931,28 @@ export interface Stage4RawResumeSections {
   fullText: string
 }
 
+/**
+ * A single section in the Stage 4 document spine.
+ * The full resume is compiled from acceptedText across all blocks in order.
+ * Nothing else is the canonical source of truth for resume content.
+ */
+export interface Stage4Section {
+  sectionId: string
+  sectionType: string   // 'summary' | 'skills' | 'experience-primary' | 'experience-secondary' | 'experience-supporting' | 'education'
+  order: number
+  /** Current accepted text — what compiles into the full resume. */
+  acceptedText: string
+  /** LLM-proposed change pending user review. */
+  proposedText?: string
+  /** accepted = no pending change; proposed = LLM output awaiting review; manual = user edited directly */
+  status: 'accepted' | 'proposed' | 'manual'
+  evidenceMappings: string[]
+  warnings: string[]
+  /** Warning IDs the user has chosen to ignore for this resume. Persisted. */
+  ignoredWarningIds?: string[]
+  lastRefinedAt?: string
+}
+
 export interface Stage4RawResumeText {
   id: string
   sessionId: string
@@ -888,7 +975,7 @@ export interface Stage4RawResumeText {
   refinementRefinedAt?: string
   /**
    * Per-section LLM refinements. Keys are section identifiers:
-   * 'summary' | 'skills' | 'experience-po' | 'experience-ba' | 'experience-qa' | 'education'
+   * 'summary' | 'skills' | 'experience-primary' | 'experience-secondary' | 'experience-supporting' | 'education'
    */
   sectionRefinements?: Record<string, Stage4SectionRefinement>
   /** Deterministic generation contract derived from session + profile at assembly time. */
@@ -899,31 +986,32 @@ export interface Stage4RawResumeText {
   strategyBrief?: ResumeStrategyBrief
   /** Quality trace built at assembly time showing which guidance components were active. */
   qualityTrace?: Stage4QualityTrace
+  /**
+   * Document spine — sections in render order with accepted/proposed state.
+   * The full resume is compiled from Stage4Section.acceptedText sorted by order.
+   * This is the canonical representation; sections.fullText is a cached snapshot.
+   */
+  sectionBlocks?: Stage4Section[]
 }
 
 // ─────────────────────────────────────────────
 // Resume Generation Contract — deterministic assembly rules
 // ─────────────────────────────────────────────
 
-export type Stage4RoleFamily =
-  | 'product_owner'
-  | 'associate_pm'
-  | 'product_analyst'
-  | 'business_analyst'
-  | 'qa'
-  | 'other'
+/** Generic role family — derived from JD title keywords, not hardcoded role names. */
+export type Stage4RoleFamily = 'primary' | 'secondary' | 'supporting' | 'other'
 
 export interface Stage4SectionPlan {
   summary: { maxLines: number }
   skills: { maxRows: number }
-  productOwner: { minBullets: number; maxBullets: number }
-  productAnalyst: { minBullets: number; maxBullets: number }
-  qa: { minBullets: number; maxBullets: number }
+  primaryRole: { minBullets: number; maxBullets: number }
+  secondaryRole: { minBullets: number; maxBullets: number }
+  supportingRole: { minBullets: number; maxBullets: number }
   education: { maxLines: number }
 }
 
 export interface Stage4SessionDirection {
-  representPOFrom2021: boolean
+  representPrimaryRole: boolean
   avoidFormalTitleHedging: boolean
   targetPosture: string
   roadmapBoundary: string
@@ -952,10 +1040,72 @@ export interface ContractViolation {
   severity: 'error' | 'warning'
 }
 
+export interface ThemeWarning {
+  themeId: string
+  themeLabel: string
+  severity: 'warning' | 'error'
+  foundInSkills: boolean
+  foundInExperience: boolean
+  matchingExperienceBullets: string[]
+  suggestedAction: 'ignore' | 'refine_section' | 'remove_skill' | 'add_bridge_question'
+}
+
+export interface RepairPatch {
+  sectionId: string
+  issueType: string
+  originalText: string
+  proposedText: string
+  explanation: string
+}
+
+export type SectionWarningType =
+  | 'role_boundary_leakage'
+  | 'duplicate_evidence'
+  | 'unsupported_claim'
+  | 'overclaim_risk'
+  | 'theme_missing_from_experience'
+  | 'skill_not_proven'
+  | 'section_overlap'
+  | 'style_robotic'
+  | 'too_dense'
+  | 'ats_structure'
+  | 'page_length'
+
+export interface SectionWarning {
+  id: string
+  sectionId: string
+  severity: 'error' | 'warning' | 'advisory'
+  warningType: SectionWarningType
+  affectedText: string
+  explanation: string
+  evidenceIds?: string[]
+  requirementIds?: string[]
+  suggestedAction:
+    | 'move_to_correct_section'
+    | 'rewrite_with_boundary'
+    | 'remove_claim'
+    | 'add_evidence'
+    | 'ignore'
+    | 'refine_section'
+  suggestedSectionId?: string
+  repairInstruction?: string
+}
+
+export interface SectionMovePatch {
+  warningType: 'role_boundary_leakage' | 'duplicate_evidence'
+  sourceSectionId: string
+  targetSectionId: string
+  affectedBullet: string
+  proposedSourceText: string
+  proposedTargetText: string
+  explanation: string
+}
+
 export interface ContractValidationResult {
   pass: boolean
   violations: ContractViolation[]
   suggestedRepairs: string[]
+  themeWarnings?: ThemeWarning[]
 }
 
 // Resume strategy ruleset and compact session brief
@@ -1372,6 +1522,55 @@ export interface LearningSignal {
 }
 
 // ─────────────────────────────────────────────
+// Normalized Learnings — bucket-classified records
+// ─────────────────────────────────────────────
+
+export type NormalizedLearningBucket =
+  | 'artifact_fact'
+  | 'bridge_fact'
+  | 'personal_signal'
+  | 'strategy_signal'
+  | 'global_signal'
+  | 'stage_learning'
+
+export type NormalizedLearningScope = 'candidate' | 'role_family' | 'session' | 'global'
+
+export interface RawLearningCandidate {
+  text: string
+  sourceStage: string
+  sourceArtifactIds?: string[]
+  evidenceIds?: string[]
+  requirementIds?: string[]
+  roleFamily?: string
+  sessionId: string
+  proposedBucket?: NormalizedLearningBucket
+  tags?: string[]
+}
+
+export interface DiscardedLearning {
+  rawText: string
+  reason: 'duplicate' | 'too_vague' | 'wrong_scope' | 'pure_fact_already_saved' | 'no_reuse_value'
+}
+
+export interface NormalizedLearning {
+  id: string
+  bucket: NormalizedLearningBucket
+  scope: NormalizedLearningScope
+  ruleText: string
+  rationale?: string
+  boundary?: string
+  examples?: string[]
+  sourceStage: string
+  sourceSessionId: string
+  sourceArtifactIds?: string[]
+  evidenceIds?: string[]
+  requirementIds?: string[]
+  roleFamily?: string
+  confidence: 'high' | 'medium' | 'low'
+  savedAt: string
+}
+
+// ─────────────────────────────────────────────
 // User Profile — Skills
 // ─────────────────────────────────────────────
 
@@ -1655,6 +1854,8 @@ export interface ProfileEvidenceIndexItem {
   text: string
   category: ClaimCategory | 'skill' | 'tool'
   evidenceStrength: 'strong' | 'medium' | 'weak'
+  /** Origin of this evidence item — used by the Evidence Bridge to weight source types. */
+  sourceType?: 'manual_profile' | 'bridge_answer' | 'resume_upload' | 'accepted_artifact' | 'calibration_signal' | 'learning_signal' | 'session_profile_snapshot'
 }
 
 /**
@@ -1671,6 +1872,216 @@ export interface ProfileProjection {
   evidenceBoundaries: SnapshotLearningSignal[]
   constraints: ProfileConstraint[]
   unresolvedConflicts: ProfileConflict[]
+}
+
+// ─────────────────────────────────────────────
+// Stage 1 Multi-Pass Pipeline — intermediate types
+// ─────────────────────────────────────────────
+
+/**
+ * Rich evidence payload assembled by the application before any LLM pass runs.
+ * The LLM never fetches this — it is always built deterministically from profile storage.
+ */
+export interface Stage1EvidencePayload {
+  workHistory: Array<{
+    id: string
+    title: string
+    company: string
+    startDate: string
+    endDate: string
+    bullets: string[]
+    domain: string
+    skills: string[]
+    approvedMetrics: string[]
+  }>
+  skills: string[]
+  certifications: string[]
+  profileClaims: ProfileEvidenceIndexItem[]
+  bridgeAnswers: Array<{ question: string; answer: string; questionType: string }>
+  acceptedArtifacts: Array<{ sectionType: string; content: string }>
+}
+
+/** Pass A — Normalized candidate profile map. Claim-oriented, not resume-oriented. */
+export interface CandidateProfileMap {
+  roles: Array<{ title: string; company: string; dates: string; coreFunctions: string[] }>
+  productOwnershipEvidence: string[]
+  productAnalystEvidence: string[]
+  businessAnalystEvidence: string[]
+  qaEvidence: string[]
+  agileEvidence: string[]
+  backlogEvidence: string[]
+  storyWritingEvidence: string[]
+  acceptanceCriteriaEvidence: string[]
+  technicalLiteracyEvidence: string[]
+  documentationEvidence: string[]
+  analyticsReportingEvidence: string[]
+  stakeholderEvidence: string[]
+  leadershipEvidence: string[]
+  metrics: string[]
+  tools: string[]
+  domainExperience: string[]
+  certifications: string[]
+  remoteWorkSignals: string[]
+  knownLimitations: string[]
+}
+
+/** Pass B — Validated profile claim. */
+export type ClaimValidationStatus = 'supported' | 'weak' | 'unsupported' | 'do_not_claim'
+
+export interface ValidatedProfileClaim {
+  claim: string
+  category: string
+  validationStatus: ClaimValidationStatus
+  supportingEvidenceRefs: string[]
+  evidenceStrength: 'strong' | 'medium' | 'weak' | 'none'
+  reasoning: string
+}
+
+/** Pass B — Full validated claim set from the profile. */
+export interface ValidatedProfileClaims {
+  supported: ValidatedProfileClaim[]
+  weak: ValidatedProfileClaim[]
+  unsupported: ValidatedProfileClaim[]
+  doNotClaim: ValidatedProfileClaim[]
+  contradictions: string[]
+}
+
+/** Pass C — Structured JD analysis item. */
+export interface JDRequirementItem {
+  text: string
+  category: 'technical' | 'domain' | 'soft' | 'tool' | 'process'
+  priority: 'high' | 'medium' | 'low'
+}
+
+/** Pass C — Full JD requirement map with hidden signals. */
+export interface JDRequirementMapExtended {
+  realJobFunction: string
+  summary: string
+  coreResponsibilities: string[]
+  mustHaveRequirements: JDRequirementItem[]
+  niceToHaveRequirements: JDRequirementItem[]
+  hiddenHiringSignals: string[]
+  atsSignals: string[]
+  likelyInterviewThemes: string[]
+  expectedResumeProofPoints: string[]
+  domainSignals: string[]
+}
+
+/** Pass D — Profile-to-JD match strength. */
+export type MatchStrength = 'direct' | 'adjacent' | 'weak' | 'unsupported' | 'do_not_claim'
+
+/** Pass D — Single requirement match entry. */
+export interface RequirementMatchEntry {
+  requirementText: string
+  requirementCategory: 'technical' | 'domain' | 'soft' | 'tool' | 'process'
+  classification: MatchStrength
+  supportingEvidence: string[]
+  evidenceRefs: string[]
+  reasoning: string
+  resumeRelevance: string
+}
+
+/** Pass D — Full match matrix. */
+export interface MatchMatrix {
+  required: RequirementMatchEntry[]
+  niceToHave: RequirementMatchEntry[]
+}
+
+/** Pass E — Gap category. resume_gap = evidence exists but not on resume. true_gap = no evidence at all. */
+export type GapCategory = 'directly_supported' | 'weakly_supported' | 'resume_gap' | 'true_gap' | 'do_not_claim'
+
+/** Pass E — Single gap fit entry. */
+export interface GapFitEntry {
+  /** Stable slug-ID derived deterministically from requirementText after Pass E. */
+  requirementId: string
+  requirementText: string
+  gapCategory: GapCategory
+  reasoning: string
+  resumeAction: string
+}
+
+/** Pass E — Full gap fit analysis. */
+export interface GapFitAnalysis {
+  directlySupported: GapFitEntry[]
+  weaklySupported: GapFitEntry[]
+  resumeGaps: GapFitEntry[]
+  trueGaps: GapFitEntry[]
+  doNotClaim: GapFitEntry[]
+}
+
+/** Pass F — Stage 2 bridge question candidate. */
+export interface Stage2QuestionCandidate {
+  /** Matches the GapFitEntry.requirementId this question was generated from. */
+  requirementId: string
+  requirement: string
+  currentClassification: MatchStrength
+  whyEvidenceIsMissing: string
+  potentialResumeImpact: string
+  question: string
+  priority: 'high' | 'medium' | 'low'
+  affectedSection: string
+  evidenceStatus: BridgeEvidenceStatus
+}
+
+// Stage 1 pipeline progress tracking
+
+export type Stage1StepId =
+  | 'loadingProfileEvidence'
+  | 'buildingCandidateProfileMap'
+  | 'analyzingJDRequirements'
+  | 'validatingProfileClaims'
+  | 'matchingProfileToJD'
+  | 'generatingGapFitAnalysis'
+  | 'generatingBridgeQuestions'
+  | 'savingResults'
+  | 'renderingArtifact'
+
+export type Stage1StepStatus = 'not_started' | 'in_progress' | 'completed' | 'failed'
+
+export interface Stage1ProgressStep {
+  id: Stage1StepId
+  label: string
+  status: Stage1StepStatus
+  error?: string
+}
+
+// Stage 1 persisted job model
+export type Stage1PassKey =
+  | 'profileMap'
+  | 'jdMap'
+  | 'claimValidation'
+  | 'matchMatrix'
+  | 'gapFit'
+  | 'bridgeQuestions'
+  | 'assembly'
+
+export interface Stage1JobPassState {
+  status: 'not_started' | 'in_progress' | 'completed' | 'failed'
+  startedAt?: string
+  completedAt?: string
+  output?: unknown
+  rawOutput?: unknown
+  validationErrors?: string[]
+  errorMessage?: string
+  retryCount: number
+}
+
+export interface Stage1Job {
+  id: string
+  company: string
+  roleTitle: string
+  jdText: string
+  jdSourceType: JDSourceType
+  domainIQText: string
+  profile: UserProfile
+  profileEvidenceIndex: ProfileEvidenceIndexItem[]
+  bridgeAnswers: Array<{ question: string; answer: string; questionType: string }>
+  acceptedArtifacts: Array<{ sectionType: string; content: string }>
+  createdAt: string
+  updatedAt: string
+  status: 'running' | 'completed' | 'failed'
+  passes: Record<Stage1PassKey, Stage1JobPassState>
+  finalArtifact?: unknown
 }
 
 // ─────────────────────────────────────────────

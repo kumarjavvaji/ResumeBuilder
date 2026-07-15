@@ -1,5 +1,6 @@
 import { anthropic, MODEL } from './client'
 import type { BridgeQuestion, JDRequirement, JDRequirementMap, UserProfile, EmphasisCategory, FitAnalysis } from '@/contracts'
+export { convertCandidatesToBridgeQuestions } from './convert-bridge-candidates'
 
 interface BridgeQuestionRaw {
   question: string
@@ -113,10 +114,10 @@ ${JSON.stringify(fitAnalysis, null, 2)}`
     system: `You generate targeted bridge questions that close the gap between a job description and a candidate's resume.
 
 Rules:
-- Questions must be specific and answerable. Not "tell me about your experience" but "Can you quantify the number of user stories you managed per sprint at Paylocity?"
+- Questions must be specific and answerable. Not "tell me about your experience" but "Can you quantify the number of user stories you managed per sprint at your current employer?"
 - Do NOT ask for facts already present in the profile provided.
 - Each question must name the specific gap, skill, or evidence it targets.
-- Each question must state which resume section it affects (summary, experience-po, experience-ba, experience-qa, skills, etc.).
+- Each question must state which resume section it affects (summary, experience-primary, experience-secondary, experience-supporting, skills, etc.).
 - Generate up to 14 questions total, one per candidate row at most — fewer is fine if the candidate list is short. Prioritize rows earlier in the candidate list (they are already sorted gap-first).
 - type classifications:
   - gap: a required JD skill the user has no coverage for

@@ -46,12 +46,14 @@ export async function deleteStage4RawResumeText(sessionId: string): Promise<void
 export async function updateStage4RawResumeTextSections(
   sessionId: string,
   sections: import('@/contracts').Stage4RawResumeSections,
+  sectionBlocks?: import('@/contracts').Stage4Section[],
 ): Promise<Stage4RawResumeText | undefined> {
   const existing = await getStage4RawResumeText(sessionId)
   if (!existing) return undefined
   const updated: Stage4RawResumeText = {
     ...existing,
     sections,
+    ...(sectionBlocks !== undefined ? { sectionBlocks } : {}),
     updatedAt: new Date().toISOString(),
   }
   await db.stage4RawResumeTexts.put(updated)
@@ -151,6 +153,131 @@ export async function rejectStage4SectionRefinement(
   delete current[sectionKey]
   await db.stage4RawResumeTexts.update(existing.id, {
     sectionRefinements: current,
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+// ─── Section block (document spine) helpers ───────────────────────────────────
+
+function patchSectionBlock<K extends keyof import('@/contracts').Stage4Section>(
+  blocks: import('@/contracts').Stage4Section[],
+  sectionId: string,
+  patch: Pick<import('@/contracts').Stage4Section, K>,
+): import('@/contracts').Stage4Section[] {
+  return blocks.map(b => b.sectionId === sectionId ? { ...b, ...patch } : b)
+}
+
+/** Store an LLM-proposed revision for a section block, pending user accept/reject. */
+export async function updateStage4SectionBlock(
+  sessionId: string,
+  sectionId: string,
+  proposedText: string,
+): Promise<void> {
+  const existing = await getStage4RawResumeText(sessionId)
+  if (!existing) return
+  const blocks = patchSectionBlock(existing.sectionBlocks ?? [], sectionId, {
+    proposedText,
+    status: 'proposed',
+    lastRefinedAt: new Date().toISOString(),
+  } as Pick<import('@/contracts').Stage4Section, 'proposedText' | 'status' | 'lastRefinedAt'>)
+  await db.stage4RawResumeTexts.update(existing.id, {
+    sectionBlocks: blocks,
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+/** Accept the pending proposal: promote proposedText → acceptedText. */
+export async function acceptStage4SectionProposal(
+  sessionId: string,
+  sectionId: string,
+): Promise<void> {
+  const existing = await getStage4RawResumeText(sessionId)
+  if (!existing) return
+  const block = (existing.sectionBlocks ?? []).find(b => b.sectionId === sectionId)
+  if (!block?.proposedText) return
+  const blocks = patchSectionBlock(existing.sectionBlocks!, sectionId, {
+    acceptedText: block.proposedText,
+    proposedText: undefined,
+    status: 'accepted',
+  } as Pick<import('@/contracts').Stage4Section, 'acceptedText' | 'proposedText' | 'status'>)
+  await db.stage4RawResumeTexts.update(existing.id, {
+    sectionBlocks: blocks,
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+/** Reject the pending proposal: discard proposedText, restore accepted state. */
+export async function rejectStage4SectionProposal(
+  sessionId: string,
+  sectionId: string,
+): Promise<void> {
+  const existing = await getStage4RawResumeText(sessionId)
+  if (!existing) return
+  const blocks = patchSectionBlock(existing.sectionBlocks ?? [], sectionId, {
+    proposedText: undefined,
+    status: 'accepted',
+  } as Pick<import('@/contracts').Stage4Section, 'proposedText' | 'status'>)
+  await db.stage4RawResumeTexts.update(existing.id, {
+    sectionBlocks: blocks,
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+/** Apply a user's direct manual edit to a section block. */
+export async function setStage4SectionManualEdit(
+  sessionId: string,
+  sectionId: string,
+  text: string,
+): Promise<void> {
+  const existing = await getStage4RawResumeText(sessionId)
+  if (!existing) return
+  const blocks = patchSectionBlock(existing.sectionBlocks ?? [], sectionId, {
+    acceptedText: text,
+    proposedText: undefined,
+    status: 'manual',
+  } as Pick<import('@/contracts').Stage4Section, 'acceptedText' | 'proposedText' | 'status'>)
+  await db.stage4RawResumeTexts.update(existing.id, {
+    sectionBlocks: blocks,
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+/** Persist a warning ID as ignored for a section block. */
+export async function ignoreStage4SectionWarning(
+  sessionId: string,
+  sectionId: string,
+  warningId: string,
+): Promise<void> {
+  const existing = await getStage4RawResumeText(sessionId)
+  if (!existing) return
+  const block = (existing.sectionBlocks ?? []).find(b => b.sectionId === sectionId)
+  if (!block) return
+  const current = block.ignoredWarningIds ?? []
+  if (current.includes(warningId)) return
+  const blocks = patchSectionBlock(existing.sectionBlocks!, sectionId, {
+    ignoredWarningIds: [...current, warningId],
+  } as Pick<import('@/contracts').Stage4Section, 'ignoredWarningIds'>)
+  await db.stage4RawResumeTexts.update(existing.id, {
+    sectionBlocks: blocks,
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+/** Remove a warning from the ignored list for a section block. */
+export async function unignoreStage4SectionWarning(
+  sessionId: string,
+  sectionId: string,
+  warningId: string,
+): Promise<void> {
+  const existing = await getStage4RawResumeText(sessionId)
+  if (!existing) return
+  const block = (existing.sectionBlocks ?? []).find(b => b.sectionId === sectionId)
+  if (!block) return
+  const blocks = patchSectionBlock(existing.sectionBlocks!, sectionId, {
+    ignoredWarningIds: (block.ignoredWarningIds ?? []).filter(id => id !== warningId),
+  } as Pick<import('@/contracts').Stage4Section, 'ignoredWarningIds'>)
+  await db.stage4RawResumeTexts.update(existing.id, {
+    sectionBlocks: blocks,
     updatedAt: new Date().toISOString(),
   })
 }

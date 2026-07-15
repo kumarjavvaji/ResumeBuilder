@@ -24,18 +24,18 @@ const jdMap: JDRequirementMap = {
 }
 
 const blueprint: ResumeGenerationContract = {
-  targetRoleFamily: 'product_analyst',
+  targetRoleFamily: 'secondary',
   targetPosture: 'Product analyst posture with Experience carrying proof.',
   sectionPlan: {
     summary: { maxLines: 3 },
     skills: { maxRows: 4 },
-    productOwner: { minBullets: 3, maxBullets: 5 },
-    productAnalyst: { minBullets: 4, maxBullets: 5 },
-    qa: { minBullets: 1, maxBullets: 2 },
+    primaryRole: { minBullets: 3, maxBullets: 5 },
+    secondaryRole: { minBullets: 4, maxBullets: 5 },
+    supportingRole: { minBullets: 1, maxBullets: 2 },
     education: { maxLines: 3 },
   },
   sessionDirection: {
-    representPOFrom2021: false,
+    representPrimaryRole: false,
     avoidFormalTitleHedging: true,
     targetPosture: 'Product analyst',
     roadmapBoundary: 'Execution and prioritization, not executive strategy ownership.',
@@ -297,7 +297,7 @@ function makeSections(): ArtifactSection[] {
   return [
     section('summary', 'Product analyst focused on release readiness.', now),
     section('skills', 'Product: release readiness', now),
-    section('experience-ba', '- Improved release readiness through clearer acceptance criteria.', now),
+    section('experience-secondary', '- Improved release readiness through clearer acceptance criteria.', now),
   ]
 }
 

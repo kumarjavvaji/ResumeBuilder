@@ -21,6 +21,7 @@ import type {
   Stage4RoleFamily,
   Stage4SectionPlan,
   Stage4SessionDirection,
+  ThemeWarning,
   UserProfile,
 } from '@/contracts'
 import { validateBulletMetrics } from '@/lib/validators/metric-quality'
@@ -43,15 +44,15 @@ export function buildResumeGenerationContract(input: ContractBuildInput): Resume
   const sectionPlan = defaultSectionPlan(targetRoleFamily)
 
   const azureDevOpsAllowed = detectAzureDevOpsAllowed(profile)
-  const representPOFrom2021 = detectPOFrom2021(overallRefinementPrompt, profile)
+  const representPrimaryRole = detectPrimaryPORole(overallRefinementPrompt, profile)
   const avoidFormalTitleHedging =
-    representPOFrom2021 ||
+    representPrimaryRole ||
     /hedg|PO-adjacent|acting PO|informal PO/i.test(overallRefinementPrompt)
 
   const salesforcePreferredPhrase = detectSalesforcePhrase(overallRefinementPrompt)
 
   const sessionDirection: Stage4SessionDirection = {
-    representPOFrom2021,
+    representPrimaryRole,
     avoidFormalTitleHedging,
     targetPosture: deriveTargetPosture(targetRoleFamily, roleTitleLower),
     roadmapBoundary:
@@ -69,8 +70,10 @@ export function buildResumeGenerationContract(input: ContractBuildInput): Resume
     'managed the team': 'led the squad',
   }
   if (avoidFormalTitleHedging) {
-    preferredReplacements['formal PO title experience'] = '3.5 years leading backlog execution'
-    preferredReplacements['formal PO tenure'] = '3.5 years leading backlog execution'
+    const poTenure = computePOTenure(profile)
+    const tenureLabel = poTenure ? `${poTenure} leading backlog execution` : 'backlog execution and sprint delivery'
+    preferredReplacements['formal PO title experience'] = tenureLabel
+    preferredReplacements['formal PO tenure'] = tenureLabel
     preferredReplacements['PO-adjacent'] = 'Product Owner'
     preferredReplacements['acting PO'] = 'Product Owner'
     preferredReplacements['informal PO'] = 'Product Owner'
@@ -84,16 +87,15 @@ export function buildResumeGenerationContract(input: ContractBuildInput): Resume
     ...jdMap.niceToHave.map(r => r.text),
   ].join(' ').toLowerCase()
 
-  const jdHasSupplyChain = /supply chain|distribution|logistics|cpg|enterprise it/i.test(jdText)
-
   const evidenceRouting: Record<string, string[]> = {
     CSPO: ['summary', 'education'],
-    Jira: ['skills', 'experience-po', 'experience-ba'],
-    Pendo: ['skills', 'experience-po', 'experience-ba'],
+    Jira: ['skills', 'experience-primary', 'experience-secondary'],
+    Pendo: ['skills', 'experience-primary', 'experience-secondary'],
     'travel willingness': [],
     'Azure DevOps': azureDevOpsAllowed ? ['skills'] : [],
-    'roadmap ownership': ['experience-po'],
-    GAINSystems: jdHasSupplyChain ? ['summary'] : [],
+    'roadmap ownership': ['experience-primary'],
+    // Dynamic: older/non-primary employer entries routed to summary when JD needs their domain
+    ...buildDynamicEmployerRouting(profile, jdText),
   }
 
   return {
@@ -111,34 +113,47 @@ export function buildResumeGenerationContract(input: ContractBuildInput): Resume
 // ─── Role family detection ────────────────────────────────────────────────────
 
 function detectRoleFamily(emphasis: EmphasisCategory, roleTitleLower: string): Stage4RoleFamily {
-  if (emphasis === 'QA') return 'qa'
-  if (emphasis === 'data') return 'product_analyst'
-  if (emphasis === 'BA') return 'business_analyst'
-  if (emphasis === 'PO') {
-    return roleTitleLower.includes('associate') ? 'associate_pm' : 'product_owner'
-  }
+  // Title-based detection is the primary signal
   if (
-    roleTitleLower.includes('associate') &&
-    (roleTitleLower.includes('product') || roleTitleLower.includes(' pm') || roleTitleLower.includes('manager'))
-  ) {
-    return 'associate_pm'
-  }
-  if (roleTitleLower.includes('product owner')) return 'product_owner'
-  if (roleTitleLower.includes('business analyst') || roleTitleLower.includes(' ba ')) return 'business_analyst'
-  if (roleTitleLower.includes('product analyst')) return 'product_analyst'
+    roleTitleLower.includes('product owner') ||
+    roleTitleLower.includes('product manager') ||
+    roleTitleLower.includes('program manager') ||
+    roleTitleLower.includes('scrum master')
+  ) return 'primary'
+
+  if (
+    roleTitleLower.includes('analyst') ||
+    roleTitleLower.includes('business analyst') ||
+    roleTitleLower.includes('product analyst') ||
+    roleTitleLower.includes('systems analyst') ||
+    roleTitleLower.includes('data analyst')
+  ) return 'secondary'
+
+  if (
+    roleTitleLower.includes('supporting') ||
+    roleTitleLower.includes('quality') ||
+    roleTitleLower.includes('test engineer') ||
+    roleTitleLower.includes('tester')
+  ) return 'supporting'
+
+  // Emphasis string as a secondary signal (caller can pass the role title or a category label)
+  const emphasisLower = emphasis.toLowerCase()
+  if (emphasisLower.includes('analyst') || emphasisLower.includes('data')) return 'secondary'
+  if (emphasisLower.includes('supporting') || emphasisLower.includes('quality')) return 'supporting'
+
   return 'other'
 }
 
 function defaultSectionPlan(roleFamily: Stage4RoleFamily): Stage4SectionPlan {
-  const isQA = roleFamily === 'qa'
+  const isSupporting = roleFamily === 'supporting'
   return {
     summary: { maxLines: 4 },
     skills: { maxRows: 5 },
-    productOwner: { minBullets: 5, maxBullets: 6 },
-    productAnalyst: { minBullets: 4, maxBullets: 5 },
-    qa: {
-      minBullets: isQA ? 5 : 3,
-      maxBullets: isQA ? 6 : 4,
+    primaryRole: { minBullets: 5, maxBullets: 6 },
+    secondaryRole: { minBullets: 4, maxBullets: 5 },
+    supportingRole: {
+      minBullets: isSupporting ? 5 : 3,
+      maxBullets: isSupporting ? 6 : 4,
     },
     education: { maxLines: 3 },
   }
@@ -146,16 +161,18 @@ function defaultSectionPlan(roleFamily: Stage4RoleFamily): Stage4SectionPlan {
 
 function deriveTargetPosture(roleFamily: Stage4RoleFamily, roleTitleLower: string): string {
   switch (roleFamily) {
-    case 'associate_pm':
-      return 'tactical product delivery / business-to-IT execution / associate product management'
-    case 'product_owner':
-      return 'tactical product delivery / backlog execution / sprint delivery / stakeholder alignment'
-    case 'product_analyst':
-      return 'product analytics / data-backed decisions / KPI measurement / stakeholder recommendations'
-    case 'business_analyst':
-      return 'requirements elicitation / gap analysis / acceptance criteria / UAT / release readiness'
-    case 'qa':
-      return 'test automation / quality frameworks / release readiness / defect prevention'
+    case 'primary':
+      return roleTitleLower
+        ? `${roleTitleLower} / backlog execution / sprint delivery / stakeholder alignment`
+        : 'tactical product delivery / backlog execution / sprint delivery / stakeholder alignment'
+    case 'secondary':
+      return roleTitleLower
+        ? `${roleTitleLower} / requirements elicitation / gap analysis / acceptance criteria`
+        : 'requirements elicitation / gap analysis / acceptance criteria / UAT / release readiness'
+    case 'supporting':
+      return roleTitleLower
+        ? `${roleTitleLower} / release readiness / defect prevention`
+        : 'release readiness / defect prevention / quality frameworks'
     default:
       return roleTitleLower
         ? `product delivery targeting: ${roleTitleLower}`
@@ -165,12 +182,75 @@ function deriveTargetPosture(roleFamily: Stage4RoleFamily, roleTitleLower: strin
 
 // ─── Session direction helpers ────────────────────────────────────────────────
 
-function detectPOFrom2021(overallPrompt: string, profile: UserProfile): boolean {
-  if (/2021.*product owner|product owner.*2021|march 2021|treat.*2021|represent.*2021/i.test(overallPrompt)) return true
+function detectPrimaryPORole(overallPrompt: string, profile: UserProfile): boolean {
+  if (/treat.*primary role|represent.*primary/i.test(overallPrompt)) return true
   if (/treat.*product owner|represent.*product owner/i.test(overallPrompt)) return true
-  return profile.workHistory.some(
-    w => /product owner/i.test(w.title) && (w.startDate?.includes('2021') || w.startDate?.includes('Mar 2021'))
-  )
+  if (/treat.*PO|represent.*PO/i.test(overallPrompt)) return true
+  // Any work history with a clear primary role title is treated as primary
+  return profile.workHistory.length > 0
+}
+
+/**
+ * Computes PO role tenure from work history dates.
+ * Returns e.g. "3.5 years" or "18 months" — or "" if dates can't be parsed.
+ * Replaces the previously hardcoded "3.5 years" literal.
+ */
+function computePOTenure(profile: UserProfile): string {
+  const poEntry = profile.workHistory.find(w => /product owner/i.test(w.title))
+  if (!poEntry) return ''
+
+  const parseDate = (d: string): Date | null => {
+    if (!d) return null
+    if (/^present$/i.test(d)) return new Date()
+    const months: Record<string, number> = {
+      jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+      jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+    }
+    const parts = d.trim().toLowerCase().split(/\s+/)
+    if (parts.length === 2) {
+      const monthKey = parts[0].slice(0, 3)
+      const year = parseInt(parts[1])
+      if (months[monthKey] !== undefined && !isNaN(year)) return new Date(year, months[monthKey], 1)
+    }
+    if (parts.length === 1 && /^\d{4}$/.test(parts[0])) return new Date(parseInt(parts[0]), 0, 1)
+    return null
+  }
+
+  const start = parseDate(poEntry.startDate)
+  const end = poEntry.endDate === 'present' ? new Date() : parseDate(poEntry.endDate ?? '')
+  if (!start || !end) return ''
+
+  const totalMonths = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth())
+  if (totalMonths < 12) return `${totalMonths} months`
+  const years = totalMonths / 12
+  const rounded = Math.round(years * 2) / 2
+  return `${rounded} years`
+}
+
+/**
+ * Derives evidence routing for non-primary work history entries.
+ * When an older employer's domain matches JD requirements, routes that employer
+ * to the summary section so the LLM can reference it as supporting context.
+ * Replaces the hardcoded employer-specific routing that previously existed.
+ */
+function buildDynamicEmployerRouting(profile: UserProfile, jdTextLower: string): Record<string, string[]> {
+  const primaryKeywords = ['product owner', 'product manager', 'business analyst',
+    'product analyst', 'systems analyst', 'data analyst']
+  const routing: Record<string, string[]> = {}
+
+  for (const entry of profile.workHistory) {
+    const titleLower = entry.title.toLowerCase()
+    const isPrimary = primaryKeywords.some(kw => titleLower.includes(kw))
+    if (isPrimary) continue
+
+    const domain = (entry.domain ?? '').toLowerCase()
+    if (!domain) continue
+    const domainWords = domain.split(/\W+/).filter(w => w.length > 3)
+    const jdRelevant = domainWords.some(word => jdTextLower.includes(word))
+    if (jdRelevant) routing[entry.company] = ['summary']
+  }
+
+  return routing
 }
 
 function detectAzureDevOpsAllowed(profile: UserProfile): boolean {
@@ -222,6 +302,93 @@ function deriveRequiredBulletThemes(jdTextLower: string): string[] {
   if (/requirement|acceptance criteria|user stor/.test(jdTextLower))
     themes.push('requirements / acceptance criteria')
   return themes
+}
+
+// ─── Skills category parser ───────────────────────────────────────────────────
+
+interface SkillCategory { label: string; items: string[] }
+
+/**
+ * Parses skills section text into structured categories.
+ * A category row is any line containing a colon: "Label: item1, item2, ..."
+ * Lines without colons are ignored for category counting purposes.
+ */
+function parseSkillCategories(text: string): SkillCategory[] {
+  return text
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l.includes(':'))
+    .map(l => {
+      const colon = l.indexOf(':')
+      const label = l.slice(0, colon).trim()
+      const items = l.slice(colon + 1).split(',').map(s => s.trim()).filter(Boolean)
+      return { label, items }
+    })
+    .filter(c => c.label.length > 0)
+}
+
+// ─── Semantic theme matchers ──────────────────────────────────────────────────
+
+/**
+ * Maps each theme label to a set of keyword/phrase matchers.
+ * ANY single match in the search text satisfies the theme.
+ * More lenient than word-by-word matching of the slash-separated label.
+ */
+const THEME_KEYWORD_MATCHERS: Record<string, string[]> = {
+  'UAT / QA collaboration': [
+    'uat', 'user acceptance', 'acceptance testing', 'qa', 'release readiness',
+    'testing considerations', 'validation criteria', 'acceptance path', 'release risk',
+    'defect', 'test plan', 'smoke test', 'quality assurance',
+  ],
+  'product performance / KPI / usage analysis': [
+    'kpi', 'usage', 'adoption', 'pendo', 'analytics', 'data-informed', 'outcome review',
+    'investment decision', 'performance metric', 'dashboard', 'reporting',
+    'signals', 'retention', 'engagement metric', 'product health',
+  ],
+  'documentation / training / stakeholder communication': [
+    'documentation', 'release notes', 'help documentation', 'stakeholder',
+    'business users', 'support teams', 'guidance', 'training', 'walkthrough',
+    'communicate', 'knowledge transfer', 'user guide', 'enablement',
+  ],
+  'backlog ownership / sprint delivery': [
+    'backlog', 'prioriti', 'sprint', 'roadmap', 'grooming', 'refinement',
+    'user stories', 'epics', 'delivery', 'scrum', 'velocity', 'iteration',
+  ],
+  'requirements / acceptance criteria': [
+    'requirements', 'acceptance criteria', 'user stories', 'epics',
+    'business rules', 'use cases', 'specifications', 'acceptance path',
+    'story mapping', 'definition of done', 'business requirements',
+  ],
+  'stakeholder alignment / cross-functional delivery': [
+    'stakeholder', 'cross-functional', 'engineering', 'alignment', 'dependencies',
+    'cross-product', 'product teams', 'go-to-market', 'launch coordination',
+    'partner team', 'delivery coordination',
+  ],
+}
+
+/** Returns true if any keyword for the given theme appears in the search text. */
+function checkThemeInText(theme: string, text: string): boolean {
+  const textLower = text.toLowerCase()
+  const keywords = THEME_KEYWORD_MATCHERS[theme]
+  if (keywords?.length) {
+    return keywords.some(kw => textLower.includes(kw))
+  }
+  // Fallback: original slash-split word-level matching
+  const terms = theme.split('/').map(t => t.trim().toLowerCase())
+  return terms.some(term => term.split(' ').every(word => textLower.includes(word)))
+}
+
+/** Returns up to 3 experience bullets that contain evidence for the given theme. */
+function findMatchingBullets(theme: string, bullets: string[]): string[] {
+  const keywords = THEME_KEYWORD_MATCHERS[theme] ?? []
+  return bullets
+    .filter(b => keywords.some(kw => b.toLowerCase().includes(kw)))
+    .slice(0, 3)
+}
+
+/** Derives a stable camelCase-like ID from a theme label. */
+function themeId(label: string): string {
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
 }
 
 // ─── Summary-vs-Experience de-duplication ────────────────────────────────────
@@ -405,85 +572,78 @@ export function validateResumeAgainstContract(
     })
   }
 
-  // Skills row count
-  const skillsRows = countNonEmptyLines(skillsText)
+  // Skills row count — count category rows (lines with "Label: items" format), not raw lines
+  const skillsCategories = parseSkillCategories(skillsText)
+  const skillsRows = skillsCategories.length > 0 ? skillsCategories.length : countNonEmptyLines(skillsText)
   if (skillsRows > contract.sectionPlan.skills.maxRows) {
     violations.push({
       rule: 'skills_max_rows',
       section: 'skills',
-      detail: `Skills has ${skillsRows} rows; max is ${contract.sectionPlan.skills.maxRows}`,
+      detail: `Skills has ${skillsRows} categor${skillsRows === 1 ? 'y' : 'ies'}; max is ${contract.sectionPlan.skills.maxRows}. Compress into fewer category rows.`,
       canAutoRepair: false,
       severity: 'error',
     })
   }
 
-  // Experience block bullet counts
+  // Experience block bullet counts — use contract.sectionPlan to validate
   const blocks = parseExperienceBlocks(experienceText)
-  const poBullets = blocks.filter(b => /product owner/i.test(b.title)).reduce((s, b) => s + b.bullets.length, 0)
-  const paBullets = blocks
-    .filter(b => /product analyst|business analyst/i.test(b.title))
-    .reduce((s, b) => s + b.bullets.length, 0)
-  const qaBullets = blocks
-    .filter(b => /test engineer|qa engineer|quality|software test/i.test(b.title))
-    .reduce((s, b) => s + b.bullets.length, 0)
+  const primaryBlocks = blocks.slice(0, 1)  // first block = primary role
+  const secondaryBlocks = blocks.slice(1, 2) // second block = secondary role
+  const supportingBlocks = blocks.slice(2)   // remaining = supporting
 
-  const poBlocks = blocks.filter(b => /product owner/i.test(b.title))
-  if (poBlocks.length > 0) {
-    if (poBullets < contract.sectionPlan.productOwner.minBullets) {
+  const primaryBullets = primaryBlocks.reduce((s, b) => s + b.bullets.length, 0)
+  const secondaryBullets = secondaryBlocks.reduce((s, b) => s + b.bullets.length, 0)
+  const supportingBullets = supportingBlocks.reduce((s, b) => s + b.bullets.length, 0)
+
+  if (primaryBlocks.length > 0) {
+    if (primaryBullets < contract.sectionPlan.primaryRole.minBullets) {
       violations.push({
-        rule: 'po_min_bullets',
-        section: 'experience-po',
-        detail: `Product Owner has ${poBullets} bullets; min is ${contract.sectionPlan.productOwner.minBullets}`,
+        rule: 'primary_min_bullets',
+        section: 'experience-primary',
+        detail: `Primary role has ${primaryBullets} bullets; min is ${contract.sectionPlan.primaryRole.minBullets}`,
         canAutoRepair: false,
         severity: 'error',
       })
     }
-    if (poBullets > contract.sectionPlan.productOwner.maxBullets) {
+    if (primaryBullets > contract.sectionPlan.primaryRole.maxBullets) {
       violations.push({
-        rule: 'po_max_bullets',
-        section: 'experience-po',
-        detail: `Product Owner has ${poBullets} bullets; max is ${contract.sectionPlan.productOwner.maxBullets}`,
+        rule: 'primary_max_bullets',
+        section: 'experience-primary',
+        detail: `Primary role has ${primaryBullets} bullets; max is ${contract.sectionPlan.primaryRole.maxBullets}`,
         canAutoRepair: false,
         severity: 'error',
       })
     }
   }
 
-  const paBlocks = blocks.filter(b => /product analyst|business analyst/i.test(b.title))
-  if (paBlocks.length > 0) {
-    if (paBullets < contract.sectionPlan.productAnalyst.minBullets) {
+  if (secondaryBlocks.length > 0) {
+    if (secondaryBullets < contract.sectionPlan.secondaryRole.minBullets) {
       violations.push({
-        rule: 'pa_min_bullets',
-        section: 'experience-ba',
-        detail: `Product Analyst has ${paBullets} bullets; min is ${contract.sectionPlan.productAnalyst.minBullets}`,
+        rule: 'secondary_min_bullets',
+        section: 'experience-secondary',
+        detail: `Secondary role has ${secondaryBullets} bullets; min is ${contract.sectionPlan.secondaryRole.minBullets}`,
         canAutoRepair: false,
         severity: 'error',
       })
     }
-    if (paBullets > contract.sectionPlan.productAnalyst.maxBullets) {
+    if (secondaryBullets > contract.sectionPlan.secondaryRole.maxBullets) {
       violations.push({
-        rule: 'pa_max_bullets',
-        section: 'experience-ba',
-        detail: `Product Analyst has ${paBullets} bullets; max is ${contract.sectionPlan.productAnalyst.maxBullets}`,
+        rule: 'secondary_max_bullets',
+        section: 'experience-secondary',
+        detail: `Secondary role has ${secondaryBullets} bullets; max is ${contract.sectionPlan.secondaryRole.maxBullets}`,
         canAutoRepair: false,
         severity: 'error',
       })
     }
   }
 
-  // QA should not dominate for product / BA roles
-  const isProductRole = [
-    'product_owner',
-    'associate_pm',
-    'product_analyst',
-    'business_analyst',
-  ].includes(contract.targetRoleFamily)
-  const qaBlocks = blocks.filter(b => /test engineer|qa engineer|quality|software test/i.test(b.title))
-  if (isProductRole && qaBlocks.length > 0 && paBlocks.length > 0 && qaBullets > paBullets) {
+  // Supporting role should not dominate for primary/secondary-focused resumes
+  const isNonSupportingTarget = contract.targetRoleFamily !== 'supporting'
+  if (isNonSupportingTarget && supportingBlocks.length > 0 && secondaryBlocks.length > 0 && supportingBullets > secondaryBullets) {
     violations.push({
-      rule: 'qa_exceeds_pa',
-      section: 'experience-qa',
-      detail: `QA has ${qaBullets} bullets but PA only has ${paBullets} — QA should not exceed PA for product/BA roles`,
+      rule: 'supporting_exceeds_secondary',
+      section: 'experience-supporting',
+      detail: `Supporting role has ${supportingBullets} bullets but secondary role only has ${secondaryBullets} — supporting should not exceed secondary`,
       canAutoRepair: false,
       severity: 'error',
     })
@@ -543,23 +703,46 @@ export function validateResumeAgainstContract(
   ) {
     violations.push({
       rule: 'roadmap_overclaim',
-      section: 'experience-po',
+      section: 'experience-primary',
       detail: 'Roadmap language may exceed leadership-sponsored execution boundary',
       canAutoRepair: false,
       severity: 'warning',
     })
   }
 
-  // Required JD themes in bullets
-  const searchSpace = (experienceText + ' ' + summaryText).toLowerCase()
+  // Required JD themes in bullets — semantic keyword matching
+  const experienceBulletLines = experienceText
+    .split('\n')
+    .filter(l => l.trim().startsWith('- '))
+    .map(l => l.trim())
+
+  const themeWarnings: ThemeWarning[] = []
   for (const theme of contract.requiredBulletThemes) {
-    const terms = theme.split('/').map(t => t.trim().toLowerCase())
-    const found = terms.some(term => term.split(' ').every(word => searchSpace.includes(word)))
-    if (!found) {
+    const foundInExperience = checkThemeInText(theme, experienceText + ' ' + summaryText)
+    const foundInSkills = checkThemeInText(theme, skillsText)
+    const matchingBullets = findMatchingBullets(theme, experienceBulletLines)
+
+    themeWarnings.push({
+      themeId: themeId(theme),
+      themeLabel: theme,
+      severity: 'warning',
+      foundInSkills,
+      foundInExperience,
+      matchingExperienceBullets: matchingBullets,
+      suggestedAction: foundInExperience
+        ? 'ignore'
+        : foundInSkills
+        ? 'refine_section'
+        : 'add_bridge_question',
+    })
+
+    if (!foundInExperience) {
       violations.push({
-        rule: 'missing_jd_theme',
+        rule: foundInSkills ? 'required_theme_only_in_skills' : 'missing_jd_theme',
         section: 'experience',
-        detail: `Required JD theme not found in resume: "${theme}"`,
+        detail: foundInSkills
+          ? `Theme "${theme}" appears in Skills but lacks proof in Experience bullets — add a grounded bullet.`
+          : `Required JD theme not found in resume: "${theme}". Add evidence to Experience if available.`,
         canAutoRepair: false,
         severity: 'warning',
       })
@@ -571,6 +754,7 @@ export function validateResumeAgainstContract(
     pass: errors.length === 0,
     violations,
     suggestedRepairs: violations.filter(v => v.canAutoRepair).map(v => v.detail),
+    themeWarnings,
   }
 }
 
@@ -618,20 +802,33 @@ export function validateStage4ResumeOutput(
     })
   }
 
-  // 2. Required JD themes that appear only in Skills, not in Experience
-  const experienceLower = experienceText.toLowerCase()
-  const skillsLower = skillsText.toLowerCase()
+  // 2. Required JD themes that appear only in Skills, not in Experience — semantic matching
+  const extraThemeWarnings: ThemeWarning[] = []
+  const experienceBulletsForTheme = experienceText
+    .split('\n')
+    .filter(l => l.trim().startsWith('- '))
+    .map(l => l.trim())
+
   for (const theme of rc.requiredExperienceThemes) {
-    const terms = theme.split('/').map(t => t.trim().toLowerCase())
-    const inExperience = terms.some(term =>
-      term.split(' ').every(word => word.length <= 2 || experienceLower.includes(word)),
-    )
-    const inSkillsOnly =
-      !inExperience &&
-      terms.some(term =>
-        term.split(' ').some(word => word.length > 3 && skillsLower.includes(word)),
-      )
-    if (inSkillsOnly) {
+    // Skip if already covered by the base validator's requiredBulletThemes
+    const alreadyCovered = base.themeWarnings?.some(tw => tw.themeLabel === theme)
+    if (alreadyCovered) continue
+
+    const inExperience = checkThemeInText(theme, experienceText)
+    const inSkills = checkThemeInText(theme, skillsText)
+    const matchingBullets = findMatchingBullets(theme, experienceBulletsForTheme)
+
+    extraThemeWarnings.push({
+      themeId: themeId(theme),
+      themeLabel: theme,
+      severity: 'warning',
+      foundInSkills: inSkills,
+      foundInExperience: inExperience,
+      matchingExperienceBullets: matchingBullets,
+      suggestedAction: inExperience ? 'ignore' : inSkills ? 'refine_section' : 'add_bridge_question',
+    })
+
+    if (inSkills && !inExperience) {
       extraViolations.push({
         rule: 'required_theme_only_in_skills',
         section: 'experience',
@@ -643,11 +840,13 @@ export function validateStage4ResumeOutput(
   }
 
   const allViolations = [...base.violations, ...extraViolations]
+  const allThemeWarnings = [...(base.themeWarnings ?? []), ...extraThemeWarnings]
   const errors = allViolations.filter(v => v.severity === 'error')
   return {
     pass: errors.length === 0,
     violations: allViolations,
     suggestedRepairs: allViolations.filter(v => v.canAutoRepair).map(v => v.detail),
+    themeWarnings: allThemeWarnings,
   }
 }
 
@@ -732,12 +931,12 @@ export function serializeContractForPrompt(contract: ResumeGenerationContract): 
     'SECTION LIMITS:',
     `  Summary: max ${sp.summary.maxLines} lines`,
     `  Skills: max ${sp.skills.maxRows} rows`,
-    `  Product Owner: ${sp.productOwner.minBullets}–${sp.productOwner.maxBullets} bullets`,
-    `  Product Analyst/BA: ${sp.productAnalyst.minBullets}–${sp.productAnalyst.maxBullets} bullets`,
-    `  QA: ${sp.qa.minBullets}–${sp.qa.maxBullets} bullets${contract.targetRoleFamily !== 'qa' ? ' (supporting only)' : ''}`,
+    `  Primary role: ${sp.primaryRole.minBullets}–${sp.primaryRole.maxBullets} bullets`,
+    `  Secondary role: ${sp.secondaryRole.minBullets}–${sp.secondaryRole.maxBullets} bullets`,
+    `  Supporting role: ${sp.supportingRole.minBullets}–${sp.supportingRole.maxBullets} bullets${contract.targetRoleFamily !== 'supporting' ? ' (supporting only)' : ''}`,
     '',
     'SESSION DIRECTION:',
-    `  PO from 2021: ${sd.representPOFrom2021 ? 'YES — March 2021–October 2024 is Product Owner; no title hedging' : 'not set'}`,
+    `  Primary role: ${sd.representPrimaryRole ? 'YES — treat first work history entry as primary role; no title hedging' : 'not set'}`,
     `  Avoid title hedging: ${sd.avoidFormalTitleHedging ? 'YES — no defensive PO title language' : 'no'}`,
     `  Roadmap boundary: ${sd.roadmapBoundary}`,
     `  Azure DevOps: ${sd.azureDevOpsAllowed ? 'allowed' : 'NOT allowed — use Jira'}`,

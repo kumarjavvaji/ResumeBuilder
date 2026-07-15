@@ -54,6 +54,7 @@ export interface CompanyIndustryBasisGenerationDiagnostic {
   displayedJsonSource: 'llm' | 'llm_normalized' | 'retry' | 'retry_normalized' | 'deterministic_fallback'
   providerErrorName?: string
   providerErrorMessage?: string
+  stopReason?: string
   semanticQuality?: SemanticQualityResult
   downstreamReady?: boolean
 }
@@ -178,6 +179,11 @@ export async function generateCompanyIndustryBasis(
       diagnostic.modelCallAttempted = true
       const response = await createMessage(buildLlmRequest(input, extractedSignals, validationErrors, deps.model))
       diagnostic.modelCallSucceeded = true
+      const stopReason = getProviderStopReason(response)
+      diagnostic.stopReason = stopReason
+      if (stopReason === 'max_tokens') {
+        throw new Error('CompanyIndustryBasis generation was incomplete because the provider stopped at max_tokens.')
+      }
       const rawBasis = extractBasisFromResponse(response)
       diagnostic.parseSucceeded = true
       const processed = processCompanyIndustryBasis(rawBasis, input)
@@ -1171,12 +1177,18 @@ function buildLlmRequest(
   const prompt = buildCompanyIndustryBasisPrompt(input, extractedSignals, validationErrors)
   return {
     model: model ?? loadConfiguredModel(),
-    max_tokens: validationErrors.length ? 2200 : 3200,
+    max_tokens: validationErrors.length ? 5000 : 7000,
     tools: [COMPANY_INDUSTRY_BASIS_TOOL],
     tool_choice: { type: 'tool', name: 'company_industry_basis' },
     system: prompt.system,
     messages: [{ role: 'user', content: prompt.user }],
   }
+}
+
+function getProviderStopReason(response: unknown): string | undefined {
+  return isRecord(response) && typeof response.stop_reason === 'string'
+    ? response.stop_reason
+    : undefined
 }
 
 async function loadDefaultCreateMessage(): Promise<(request: unknown) => Promise<unknown>> {

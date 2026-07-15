@@ -31,10 +31,12 @@ export function computeUnmatchedFindings(
 function coverageVariant(status: Stage1Finding['coverageStatus']) {
   switch (status) {
     case 'covered': return 'covered' as const
+    case 'partially_covered': return 'partial' as const
     case 'partial': return 'partial' as const
     case 'gap': return 'gap' as const
     case 'needs_evidence': return 'partial' as const
     case 'weakly_supported': return 'partial' as const
+    case 'retrieval_gap': return 'partial' as const
     case 'context_only': return 'neutral' as const
     default: return 'neutral' as const
   }
@@ -108,7 +110,7 @@ export function TraceableBullet({
     <li className={className}>
       <div className="flex items-start gap-2">
         <span className="shrink-0">·</span>
-        <span className="flex-1">{text}</span>
+        <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">{text}</span>
         {finding && (
           <button
             type="button"

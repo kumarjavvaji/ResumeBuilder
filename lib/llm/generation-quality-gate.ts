@@ -10,6 +10,21 @@
 
 import type { SectionType } from '@/contracts'
 
+/**
+ * Runtime context derived from the active user profile and JD.
+ * Replaces personal literals that were previously hardcoded in gate text —
+ * PO dates, verified metrics, and unrelated employer names are now read from
+ * the active profile at generation time.
+ */
+export interface QualityGateContext {
+  /** PO date range from work history, e.g. "March 2021 – October 2024". */
+  poDateRange?: string
+  /** Up to 3 verified metrics from the primary PO role's approvedMetrics. */
+  verifiedMetrics?: string[]
+  /** Employer names to explicitly exclude from summary (older + JD-irrelevant). */
+  olderEmployersToExclude?: string[]
+}
+
 // ─── Testable constants ───────────────────────────────────────────────────────
 
 /** Phrases that must never appear in a generated Summary. */
@@ -19,7 +34,6 @@ export const SUMMARY_PROHIBITIONS = [
   'grounding operational',
   'grounding data pipeline',
   'grounding supply chain',
-  'GAINSystems',
 ] as const
 
 /** Bullet quality rules enforced for all experience sections. */
@@ -42,7 +56,7 @@ export const PA_OVERCLAIM_PROHIBITIONS = [
  * Returns quality gate instructions for the given section type.
  * Injected at the end of the system prompt — after all other instructions.
  */
-export function buildSectionQualityGate(sectionType: SectionType): string {
+export function buildSectionQualityGate(sectionType: SectionType, ctx?: QualityGateContext): string {
   const lines: string[] = ['', '═══ QUALITY GATE — ENFORCE BEFORE RETURNING ═══']
 
   switch (sectionType) {
@@ -52,10 +66,12 @@ export function buildSectionQualityGate(sectionType: SectionType): string {
         'SUMMARY RULES (strictly enforced):',
         '- 3–4 lines maximum. This is a positioning statement, NOT a career history dump.',
         '- Lead with the target operating identity.',
-        '  Good: "CSPO-certified Product Owner with 3.5 years leading backlog execution, sprint delivery, user story refinement, UAT readiness, and business-to-IT translation for enterprise SaaS products."',
+        '  Good: "CSPO-certified Product Owner with [N] years leading backlog execution, sprint delivery, user story refinement, UAT readiness, and business-to-IT translation for enterprise SaaS products."',
         '- Mention CSPO only if it strengthens the JD match.',
         '- Mention QA background only as a single supporting phrase ("Brings QA-informed judgment on...") — do NOT narrate QA career history.',
-        '- DO NOT mention GAINSystems or other older employers unless the JD explicitly requires that domain.',
+        ctx?.olderEmployersToExclude?.length
+          ? `- DO NOT mention ${ctx.olderEmployersToExclude.map(e => `"${e}"`).join(', ')} or other older employers unless the JD explicitly requires that domain.`
+          : '- DO NOT mention older employers not required by this JD.',
         '- DO NOT use "formal PO tenure" — sounds defensive and title-anxious.',
         '- DO NOT use "early career includes..." — turns the summary into a compressed resume.',
         '- DO NOT use "grounding X context" phrasing — vague filler.',
@@ -70,7 +86,9 @@ export function buildSectionQualityGate(sectionType: SectionType): string {
         'FINAL CHECK before returning summary:',
         '  □ Under 4 lines?',
         '  □ Reads as positioning, not career history?',
-        '  □ No GAINSystems, no "formal PO tenure", no "early career includes"?',
+        ctx?.olderEmployersToExclude?.length
+          ? `  □ No ${ctx.olderEmployersToExclude.map(e => `"${e}"`).join(', ')}, no "formal PO tenure", no "early career includes"?`
+          : '  □ No older employers not required by this JD, no "formal PO tenure", no "early career includes"?',
         '  □ No sentence starts with "Early career...", "Background includes...", "With a decade of..."?',
       )
       break
@@ -89,57 +107,61 @@ export function buildSectionQualityGate(sectionType: SectionType): string {
       )
       break
 
-    case 'experience-po':
+    case 'experience-primary':
       lines.push(
         '',
-        'PRODUCT OWNER BULLET RULES:',
+        'PRIMARY ROLE BULLET RULES:',
         '- 1–2 lines per bullet maximum — no paragraph-length bullets.',
         '- One primary claim per bullet — do not chain 4–5 concepts with commas and dashes.',
         '- Use "~" for all approximations — never "approximately".',
-        '- Date range: March 2021–October 2024. Do not hedge as "PO-adjacent" or "acting PO".',
+        ctx?.poDateRange
+          ? `- Date range: ${ctx.poDateRange}. Do not hedge the role title as acting or informal.`
+          : '- Use the exact date range from the candidate profile for the primary role. Do not hedge the title if the profile treats this as the primary role.',
         '- Roadmap framing: use "executed leadership-sponsored roadmap" or "translated roadmap priorities into release-ready scope."',
         '  Do NOT use executive-strategy language that implies independent product vision ownership.',
-        '- Preserve verified metrics (~$63M retention, ~3% utilization growth) but compress surrounding wording.',
+        ctx?.verifiedMetrics?.length
+          ? `- Preserve verified metrics (${ctx.verifiedMetrics.map(m => `~${m}`).join(', ')}) but compress surrounding wording.`
+          : '- Preserve verified metrics from the candidate profile exactly as stated, but compress surrounding wording to stay within bullet length.',
         '',
         'FINAL CHECK:',
         '  □ Each bullet is 1–2 lines?',
         '  □ "approximately" replaced with "~"?',
         '  □ Roadmap language bounded to execution, not strategy ownership?',
+        '  □ No hedging of the primary role title?',
       )
       break
 
-    case 'experience-ba':
+    case 'experience-secondary':
       lines.push(
         '',
-        'PRODUCT ANALYST / BUSINESS ANALYST BULLET RULES:',
+        'SECONDARY ROLE BULLET RULES:',
         '- 1–2 lines per bullet maximum.',
         '- Use "~" for approximations.',
-        '- Do NOT claim "Led all Scrum ceremonies", "Owned product roadmap", or "Managed sprint delivery" unless directly evidenced.',
-        '- If Scrum ceremony support is mentioned, phrase as:',
-        '  "Supported backlog refinement, sprint demos, and ceremony preparation by grounding discussion in client impact and stakeholder feedback."',
+        '- Do NOT claim responsibilities that belong to the primary or senior role unless directly evidenced.',
+        '  Examples of overclaim to avoid: "Led all Scrum ceremonies", "Owned product roadmap", "Managed sprint delivery".',
         '- Preferred phrasing verbs: Partnered, Refined, Recommended, Translated, Triaged, Maintained, Analyzed.',
-        '- Do NOT mirror PO framing — PA bullets should sound like analytical and requirements support, not backlog ownership.',
+        '- Bullets should reflect the secondary role\'s scope — do not mirror the primary role framing.',
         '',
         'FINAL CHECK:',
-        '  □ No "Led Scrum ceremonies", "Owned roadmap", "Managed sprint delivery"?',
+        '  □ No overclaiming of primary-role responsibilities?',
         '  □ Each bullet is 1–2 lines?',
         '  □ "approximately" replaced with "~"?',
       )
       break
 
-    case 'experience-qa':
+    case 'experience-supporting':
       lines.push(
         '',
-        'QA BULLET RULES:',
+        'SUPPORTING ROLE BULLET RULES:',
         '- 1–2 lines per bullet maximum.',
         '- Use "~" for approximations.',
-        '- QA is a supporting differentiator for this role — keep it focused on UAT readiness, release validation, defect reduction.',
-        '- Do not make QA the dominant identity of the resume.',
+        '- Supporting role is a differentiator — keep bullets focused on the specific competency being demonstrated.',
+        '- Do not let the supporting role dominate the resume narrative.',
         '',
         'FINAL CHECK:',
         '  □ Each bullet is 1–2 lines?',
         '  □ "approximately" replaced with "~"?',
-        '  □ QA positioned as supporting differentiator, not dominant?',
+        '  □ Supporting role positioned as differentiator, not dominant identity?',
       )
       break
 
@@ -163,13 +185,17 @@ export function buildSectionQualityGate(sectionType: SectionType): string {
  * Full-resume quality gate for Stage 4 full-resume refinement calls.
  * Checks the entire resume output before returning.
  */
-export function buildFullResumeQualityGate(): string {
+export function buildFullResumeQualityGate(ctx?: Pick<QualityGateContext, 'olderEmployersToExclude'>): string {
+  const employerCheck = ctx?.olderEmployersToExclude?.length
+    ? `  □ No "formal PO tenure", "early career includes", ${ctx.olderEmployersToExclude.map(e => `"${e}"`).join(', ')}, or defensive phrasing`
+    : '  □ No "formal PO tenure", "early career includes", older employers not required by this JD, or defensive phrasing'
+
   return `
 ═══ FULL-RESUME QUALITY GATE — VERIFY BEFORE RETURNING ═══
 
 SUMMARY CHECK:
   □ Summary is 3–4 lines and reads as a positioning statement, NOT a career history dump
-  □ No "formal PO tenure", "early career includes", GAINSystems, or defensive phrasing
+${employerCheck}
   □ No sentence starting with "Background includes...", "With a decade of...", "Early career..."
 
 SKILLS CHECK:
@@ -180,18 +206,18 @@ SKILLS CHECK:
 EXPERIENCE BULLETS CHECK:
   □ All bullets are 1–2 lines — no paragraph-length bullets
   □ "approximately" replaced with "~" everywhere
-  □ PA section does NOT claim "Led Scrum ceremonies", "Owned roadmap", "Managed sprint delivery"
-  □ PO roadmap language bounded to execution ("executed leadership-sponsored roadmap")
+  □ Secondary/supporting sections do NOT claim primary-role responsibilities (roadmap ownership, sprint delivery lead, etc.)
+  □ Primary-role roadmap language bounded to execution ("executed leadership-sponsored roadmap")
 
 CONTENT SAFETY CHECK:
   □ No travel willingness as a resume bullet
   □ No Azure DevOps unless evidenced
   □ No invented employers, tools, titles, certifications, dates, or metrics
-  □ CSPO cited only if present in education or bridge answers
-  □ QA is supportive, not the dominant identity
+  □ Certifications cited only if present in education, certifications, or bridge answers
+  □ Supporting roles are supportive, not the dominant identity
 
 POSTURE CHECK:
-  □ Tone fits Associate IT PM / tactical product delivery
+  □ Tone fits the target role posture
   □ JD terms appear in bullets, not only in Skills
   □ Realistic for two pages
 

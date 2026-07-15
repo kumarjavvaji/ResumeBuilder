@@ -37,15 +37,17 @@ export function countByType(refs: CalibrationReference[]) {
   }
 }
 
-/** Minimum threshold for enabling "Apply to artifacts". */
+/** Minimum threshold for enabling "Apply to artifacts". Rejected refs do not count. */
 export function isMinThresholdMet(refs: CalibrationReference[]): boolean {
-  const { target, comparable } = countByType(refs)
+  const active = refs.filter(r => r.calibrationGroup !== 'rejected')
+  const { target, comparable } = countByType(active)
   return target >= 3 || comparable >= 3
 }
 
-/** Full/ideal threshold: 5 target AND 5 comparable (per spec: "5+5 = full calibration"). */
+/** Full/ideal threshold: 5 target AND 5 comparable. Rejected refs do not count. */
 export function isIdealThresholdMet(refs: CalibrationReference[]): boolean {
-  const { target, comparable } = countByType(refs)
+  const active = refs.filter(r => r.calibrationGroup !== 'rejected')
+  const { target, comparable } = countByType(active)
   return target >= 5 && comparable >= 5
 }
 
@@ -84,7 +86,10 @@ export function mechanicalEnrichCandidate(
     limitations: isGated
       ? 'Source page appears gated; public snippet used only.'
       : candidate.limitationsNote,
-    collectedAt: new Date().toISOString()
+    collectedAt: new Date().toISOString(),
+    // Mechanical enrichment has no JD context — treat as supporting pending LLM classification
+    calibrationGroup: 'supporting' as const,
+    sourceDepth: isGated ? 'shallow' as const : 'moderate' as const,
   }
 }
 
@@ -115,6 +120,98 @@ export function isGatedContent(text: string): boolean {
     lower.includes('join now') ||
     lower.includes('authwall')
   )
+}
+
+// ─── Ref deduplication ───────────────────────────────────────────────────────
+
+/** Stable source key for a CalibrationReference — url takes priority, then name@company, then title@company. */
+function refSourceKey(r: CalibrationReference): string {
+  const url = r.sourceUrl ?? r.profileUrl
+  if (url) return url.toLowerCase().replace(/\/$/, '')
+  if (r.personName) return `${r.personName.toLowerCase().trim()}@${r.company.toLowerCase().trim()}`
+  return `${r.title.toLowerCase().trim()}@${r.company.toLowerCase().trim()}`
+}
+
+const SOURCE_DEPTH_RANK: Record<NonNullable<CalibrationReference['sourceDepth']>, number> = {
+  rich: 3, moderate: 2, shallow: 1,
+}
+const CALIB_GROUP_RANK: Record<NonNullable<CalibrationReference['calibrationGroup']>, number> = {
+  primary: 4, supporting: 3, context_only: 2, rejected: 1,
+}
+
+/** Merge two refs that represent the same source, preserving richer data from each. */
+function mergeCalibrationRefs(
+  a: CalibrationReference,
+  b: CalibrationReference
+): CalibrationReference {
+  const depthA = a.sourceDepth ? SOURCE_DEPTH_RANK[a.sourceDepth] : 0
+  const depthB = b.sourceDepth ? SOURCE_DEPTH_RANK[b.sourceDepth] : 0
+  const richer = depthA >= depthB ? a : b
+
+  // Prefer whichever calibrationGroup is most specific.
+  // 'supporting' is the mechanical enrichment default — an explicit LLM classification beats it.
+  const groupRankA = a.calibrationGroup ? CALIB_GROUP_RANK[a.calibrationGroup] : 0
+  const groupRankB = b.calibrationGroup ? CALIB_GROUP_RANK[b.calibrationGroup] : 0
+  const calibrationGroup = (groupRankA >= groupRankB ? a : b).calibrationGroup
+
+  const longer = <T>(x?: T[], y?: T[]) => ((x?.length ?? 0) >= (y?.length ?? 0) ? x : y)
+
+  return {
+    ...richer,
+    id: a.id,  // keep first id — handlers use this id
+    sessionId: a.sessionId,
+    calibrationGroup,
+    manualContext: (a.manualContext?.length ?? 0) >= (b.manualContext?.length ?? 0)
+      ? a.manualContext
+      : b.manualContext,
+    manualContextUpdatedAt: a.manualContextUpdatedAt ?? b.manualContextUpdatedAt,
+    referenceDepth:
+      a.referenceDepth === 'manual_enriched' || b.referenceDepth === 'manual_enriched'
+        ? 'manual_enriched'
+        : a.referenceDepth ?? b.referenceDepth,
+    enrichmentSource: a.enrichmentSource ?? b.enrichmentSource,
+    useFor: longer(a.useFor, b.useFor),
+    doNotUseFor: longer(a.doNotUseFor, b.doNotUseFor),
+    jdAlignmentElements: longer(a.jdAlignmentElements, b.jdAlignmentElements),
+    riskNote: a.riskNote ?? b.riskNote,
+    rejectedReason: a.rejectedReason ?? b.rejectedReason,
+    limitations: a.limitations ?? b.limitations,
+  }
+}
+
+/**
+ * Deduplicate a mixed list of CalibrationReferences coming from multiple sources
+ * (enrichedRefs from candidates + userRefs from the refs store).
+ *
+ * Phase 1: merge by id — the main case where the same ref was written to both stores.
+ * Phase 2: merge by source identity (url / name@company) across different ids —
+ * guards against rare cases where the same real person ended up with two distinct ids.
+ *
+ * The first occurrence's id is kept so that handleRemoveRef / handleUpdateRef still
+ * target the correct record.
+ */
+export function dedupeRefs(refs: CalibrationReference[]): CalibrationReference[] {
+  // Phase 1: merge by id
+  const byId = new Map<string, CalibrationReference>()
+  for (const r of refs) {
+    const existing = byId.get(r.id)
+    byId.set(r.id, existing ? mergeCalibrationRefs(existing, r) : r)
+  }
+
+  // Phase 2: merge by source key across different ids
+  const bySourceKey = new Map<string, CalibrationReference>()
+  for (const r of byId.values()) {
+    const key = refSourceKey(r)
+    const existing = bySourceKey.get(key)
+    if (existing) {
+      // Same source, different ids — merge, keep first id
+      bySourceKey.set(key, mergeCalibrationRefs(existing, r))
+    } else {
+      bySourceKey.set(key, r)
+    }
+  }
+
+  return Array.from(bySourceKey.values())
 }
 
 // ─── Enriched refs from candidates ───────────────────────────────────────────

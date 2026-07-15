@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+﻿import { describe, expect, it } from 'vitest'
 import type { ArtifactSection, ResumeBullet, SectionType, UserProfile, WorkEntry } from '@/contracts'
 import {
   buildStage4RawResumeText,
@@ -74,9 +74,9 @@ function profile(overrides: Partial<UserProfile> = {}): UserProfile {
     linkedIn: '',
     summary: '',
     workHistory: [
-      work({ id: 'po-role', title: 'Product Owner', company: 'Paylocity', startDate: '2023', endDate: 'Present' }),
-      work({ id: 'ba-role', title: 'Product Analyst', company: 'Paylocity', startDate: '2020', endDate: '2023' }),
-      work({ id: 'qa-role', title: 'Lead QA Analyst', company: 'Paylocity', startDate: '2017', endDate: '2020' })
+      work({ id: 'po-role', title: 'Product Owner', company: 'SaaS Co', startDate: '2023', endDate: 'Present' }),
+      work({ id: 'ba-role', title: 'Product Analyst', company: 'SaaS Co', startDate: '2020', endDate: '2023' }),
+      work({ id: 'qa-role', title: 'Lead QA Analyst', company: 'SaaS Co', startDate: '2017', endDate: '2020' })
     ],
     education: [{ id: 'edu-1', institution: 'State University', degree: 'BS', field: 'Information Systems', graduationYear: '2016' }],
     skillGroups: [],
@@ -93,18 +93,18 @@ function requiredSections(): ArtifactSection[] {
   return [
     section('summary', { content: 'Business analyst focused on requirements translation and release readiness.' }),
     section('skills', { content: 'Analysis: Requirements, Gap Analysis\nData: SQL, Pendo' }),
-    section('experience-po', {
+    section('experience-primary', {
       bullets: [bullet('Owned backlog sequencing for releases with 12 scrum teams.')]
     }),
-    section('experience-ba', {
+    section('experience-secondary', {
       bullets: [
         bullet('Used Salesforce, Pendo, and support signals to prioritize backlog items tied to user impact.'),
         bullet('Leveraged stakeholder alignment to drive transformative delivery outcomes.'),
         bullet('Needs confirmation claim.', { partition: 'needs-confirmation' }),
-        bullet('Suggested elsewhere claim.', { partition: 'suggested-other', suggestedSection: 'experience-po' })
+        bullet('Suggested elsewhere claim.', { partition: 'suggested-other', suggestedSection: 'experience-primary' })
       ]
     }),
-    section('experience-qa', {
+    section('experience-supporting', {
       bullets: [bullet('Reduced regression review time by 40% during 2019 release cycles.')]
     })
   ]
@@ -175,7 +175,7 @@ describe('Stage 4 raw resume text', () => {
       generatedAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z'
     }
-    const changed = sections.map(s => s.type === 'experience-ba'
+    const changed = sections.map(s => s.type === 'experience-secondary'
       ? { ...s, version: s.version + 1, updatedAt: '2026-01-02T00:00:00.000Z' }
       : s)
     const staleReasons = getStage4StaleReasons(raw, changed)
@@ -223,3 +223,4 @@ describe('Stage 4 raw resume text', () => {
     expect(regenerated.find(s => s.type === 'summary')?.status).toBe('accepted')
   })
 })
+

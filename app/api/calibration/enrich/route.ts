@@ -10,6 +10,7 @@ export async function POST(req: NextRequest) {
       candidate: CalibrationCandidate
       targetCompany: string
       roleTitle: string
+      jdText?: string
     }
 
     rawCandidate = body.candidate
@@ -30,6 +31,7 @@ export async function POST(req: NextRequest) {
         candidate: rawCandidate,
         targetCompany: body.targetCompany,
         roleTitle: body.roleTitle,
+        jdText: body.jdText,
         signal: controller.signal
       })
     } finally {

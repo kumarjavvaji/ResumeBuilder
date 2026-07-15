@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Tests for QualifiedEvidenceCards and ClaimFidelityCheck.
  *
  * Uses purely synthetic fixtures — no company-specific or role-specific
@@ -111,10 +111,10 @@ const analyticsWork = [
 ]
 
 const analyticsQuestions: BridgeQuestion[] = [
-  makeQuestion('q-sql', 'I use SQL daily to query Salesforce and Pendo data for reports in my role', 'experience-ba'),
-  makeQuestion('q-pbi', 'I learned Power BI in a course last year but haven\'t used it professionally in my role', 'experience-ba'),
-  makeQuestion('q-hmda', 'I\'m not sure about HMDA compliance requirements — I don\'t have experience with that', 'experience-ba'),
-  makeQuestion('q-tableau', 'I\'ve done some Tableau training on my own but it was outside my current role', 'experience-ba'),
+  makeQuestion('q-sql', 'I use SQL daily to query Salesforce and Pendo data for reports in my role', 'experience-secondary'),
+  makeQuestion('q-pbi', 'I learned Power BI in a course last year but haven\'t used it professionally in my role', 'experience-secondary'),
+  makeQuestion('q-hmda', 'I\'m not sure about HMDA compliance requirements — I don\'t have experience with that', 'experience-secondary'),
+  makeQuestion('q-tableau', 'I\'ve done some Tableau training on my own but it was outside my current role', 'experience-secondary'),
 ]
 
 const analyticsJD = makeJD(['SQL and data analysis', 'KPI measurement and dashboards', 'Salesforce CRM analytics', 'Pendo product analytics'])
@@ -137,8 +137,8 @@ const poWork = [
 ]
 
 const poQuestions: BridgeQuestion[] = [
-  makeQuestion('q-jira', 'I led sprint reviews and managed the product backlog in Jira as part of my daily work', 'experience-po', 'evidence'),
-  makeQuestion('q-agile-cert', 'I studied for an agile certification on my own but it wasn\'t part of my core work responsibilities', 'experience-po', 'evidence'),
+  makeQuestion('q-jira', 'I led sprint reviews and managed the product backlog in Jira as part of my daily work', 'experience-primary', 'evidence'),
+  makeQuestion('q-agile-cert', 'I studied for an agile certification on my own but it wasn\'t part of my core work responsibilities', 'experience-primary', 'evidence'),
 ]
 
 const poJD = makeJD(['Backlog management and sprint delivery', 'Stakeholder alignment', 'Roadmap ownership', 'JIRA and agile tooling'])
@@ -160,8 +160,8 @@ const qaWork = [
 ]
 
 const qaQuestions: BridgeQuestion[] = [
-  makeQuestion('q-specflow', 'I built our SpecFlow automation framework from scratch in my QA Lead role', 'experience-qa', 'evidence'),
-  makeQuestion('q-playwright', 'I\'ve read about Playwright but never used it professionally', 'experience-qa', 'evidence'),
+  makeQuestion('q-specflow', 'I built our SpecFlow automation framework from scratch in my QA Lead role', 'experience-supporting', 'evidence'),
+  makeQuestion('q-playwright', 'I\'ve read about Playwright but never used it professionally', 'experience-supporting', 'evidence'),
 ]
 
 const qaJD = makeJD(['Test automation and quality frameworks', 'SpecFlow and regression testing', 'Release readiness', 'Defect reduction metrics'])
@@ -174,7 +174,7 @@ const qaProfile = makeProfile(qaWork, [], [
 describe('buildQualifiedEvidenceCards', () => {
   // SC3 + SC10: Direct work history bullets → direct evidence card
   it('classifies primary work entry bullets as direct evidence (analytics fixture)', () => {
-    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-ba')
+    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-secondary')
     const cards = buildQualifiedEvidenceCards(analyticsProfile, analyticsQuestions, analyticsJD, bundle)
 
     const directCards = cards.filter(
@@ -183,13 +183,13 @@ describe('buildQualifiedEvidenceCards', () => {
     const paWorkCards = directCards.filter(c => c.sourceId === 'w-pa')
     expect(paWorkCards.length).toBeGreaterThanOrEqual(2)
     expect(paWorkCards[0].confidence).not.toBe('none')
-    expect(paWorkCards[0].useInSections).toContain('experience-ba')
+    expect(paWorkCards[0].useInSections).toContain('experience-secondary')
     expect(paWorkCards[0].avoidInSections).toHaveLength(0)
   })
 
   // SC3: Supporting work entry bullets → adjacent evidence card
   it('classifies supporting work entry bullets as adjacent with framing boundaries', () => {
-    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-ba')
+    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-secondary')
     const cards = buildQualifiedEvidenceCards(analyticsProfile, analyticsQuestions, analyticsJD, bundle)
 
     const adjacentCards = cards.filter(
@@ -199,25 +199,25 @@ describe('buildQualifiedEvidenceCards', () => {
     const poCard = adjacentCards[0]
     expect(poCard.boundaries.length).toBeGreaterThan(0)
     expect(poCard.boundaries[0]).toMatch(/prior-background framing/i)
-    expect(poCard.avoidInSections).toContain('experience-ba')
+    expect(poCard.avoidInSections).toContain('experience-secondary')
     expect(poCard.useInSections).toContain('summary')
   })
 
   // SC1: "I learned X in a course but haven't used it professionally" → learning-only
   it('classifies learning-only bridge answers correctly', () => {
-    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-ba')
+    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-secondary')
     const cards = buildQualifiedEvidenceCards(analyticsProfile, analyticsQuestions, analyticsJD, bundle)
 
     const pbiCard = cards.find(c => c.sourceType === 'bridge-answer' && c.sourceId === 'q-pbi')
     expect(pbiCard).toBeDefined()
     expect(pbiCard!.evidenceType).toBe('learning-only')
     expect(pbiCard!.confidence).toBe('low')
-    expect(pbiCard!.avoidInSections).toContain('experience-ba')
+    expect(pbiCard!.avoidInSections).toContain('experience-secondary')
     expect(pbiCard!.prohibitedResumeLanguage.length).toBeGreaterThan(0)
   })
 
   it('classifies self-taught Tableau as learning-only', () => {
-    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-ba')
+    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-secondary')
     const cards = buildQualifiedEvidenceCards(analyticsProfile, analyticsQuestions, analyticsJD, bundle)
 
     const tableauCard = cards.find(c => c.sourceType === 'bridge-answer' && c.sourceId === 'q-tableau')
@@ -228,7 +228,7 @@ describe('buildQualifiedEvidenceCards', () => {
 
   // SC6: "I don't have experience / not sure" → learning-only, confidence: none
   it('classifies negative/uncertain bridge answers with none confidence', () => {
-    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-ba')
+    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-secondary')
     const cards = buildQualifiedEvidenceCards(analyticsProfile, analyticsQuestions, analyticsJD, bundle)
 
     const hmdaCard = cards.find(c => c.sourceType === 'bridge-answer' && c.sourceId === 'q-hmda')
@@ -241,7 +241,7 @@ describe('buildQualifiedEvidenceCards', () => {
 
   // Metrics → high confidence metric cards
   it('creates high-confidence metric cards from approved metrics', () => {
-    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-ba')
+    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-secondary')
     const cards = buildQualifiedEvidenceCards(analyticsProfile, analyticsQuestions, analyticsJD, bundle)
 
     const metricCards = cards.filter(c => c.sourceType === 'work-history-metric')
@@ -253,7 +253,7 @@ describe('buildQualifiedEvidenceCards', () => {
 
   // "I use SQL daily in my role" → direct, medium confidence bridge card
   it('classifies direct professional bridge answers as direct evidence', () => {
-    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-ba')
+    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-secondary')
     const cards = buildQualifiedEvidenceCards(analyticsProfile, analyticsQuestions, analyticsJD, bundle)
 
     const sqlCard = cards.find(c => c.sourceType === 'bridge-answer' && c.sourceId === 'q-sql')
@@ -265,7 +265,7 @@ describe('buildQualifiedEvidenceCards', () => {
 
   // SC10: Works for PO role family
   it('classifies primary work entry as direct for PO fixture', () => {
-    const bundle = buildScopedEvidenceBundle(poProfile, poQuestions, 'experience-po')
+    const bundle = buildScopedEvidenceBundle(poProfile, poQuestions, 'experience-primary')
     const cards = buildQualifiedEvidenceCards(poProfile, poQuestions, poJD, bundle)
 
     const pmBulletCards = cards.filter(c => c.sourceType === 'work-history-bullet' && c.sourceId === 'w-pm')
@@ -279,7 +279,7 @@ describe('buildQualifiedEvidenceCards', () => {
 
   // SC10: Works for QA role family
   it('classifies QA lead work as direct and Playwright bridge answer as learning-only', () => {
-    const bundle = buildScopedEvidenceBundle(qaProfile, qaQuestions, 'experience-qa')
+    const bundle = buildScopedEvidenceBundle(qaProfile, qaQuestions, 'experience-supporting')
     const cards = buildQualifiedEvidenceCards(qaProfile, qaQuestions, qaJD, bundle)
 
     const qaDirectCards = cards.filter(c => c.sourceType === 'work-history-bullet' && c.sourceId === 'w-qa')
@@ -297,7 +297,7 @@ describe('buildQualifiedEvidenceCards', () => {
 describe('runClaimFidelityCheck', () => {
   // SC5: Professional verb + learning-only evidence → violation
   it('detects learning-only overclaim when professional verbs used', () => {
-    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-ba')
+    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-secondary')
     const cards = buildQualifiedEvidenceCards(analyticsProfile, analyticsQuestions, analyticsJD, bundle)
 
     const bullets = [
@@ -313,7 +313,7 @@ describe('runClaimFidelityCheck', () => {
 
   // SC5: Familiar-with framing for learning-only evidence → no violation
   it('passes clean framing for learning-only evidence', () => {
-    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-ba')
+    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-secondary')
     const cards = buildQualifiedEvidenceCards(analyticsProfile, analyticsQuestions, analyticsJD, bundle)
 
     const bullets = [
@@ -325,7 +325,7 @@ describe('runClaimFidelityCheck', () => {
 
   // SC3: Adjacent bullet without framing + professional verb → violation
   it('detects adjacent overclaim when prior-background framing is absent', () => {
-    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-ba')
+    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-secondary')
     const cards = buildQualifiedEvidenceCards(analyticsProfile, analyticsQuestions, analyticsJD, bundle)
 
     // PO work "backlog" keyword + professional verb "managed" without framing
@@ -340,7 +340,7 @@ describe('runClaimFidelityCheck', () => {
 
   // SC3: Adjacent bullet WITH prior-background framing → no violation
   it('passes adjacent bullet when explicit prior-background framing is present', () => {
-    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-ba')
+    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-secondary')
     const cards = buildQualifiedEvidenceCards(analyticsProfile, analyticsQuestions, analyticsJD, bundle)
 
     const bullets = [
@@ -352,7 +352,7 @@ describe('runClaimFidelityCheck', () => {
 
   // SC6: Negative evidence used for positive claim → violation
   it('detects claim made from negative evidence', () => {
-    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-ba')
+    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-secondary')
     const cards = buildQualifiedEvidenceCards(analyticsProfile, analyticsQuestions, analyticsJD, bundle)
 
     // HMDA is the topic user denied
@@ -367,7 +367,7 @@ describe('runClaimFidelityCheck', () => {
 
   // Clean bullets with no violations
   it('passes all bullets when no violations are present', () => {
-    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-ba')
+    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-secondary')
     const cards = buildQualifiedEvidenceCards(analyticsProfile, analyticsQuestions, analyticsJD, bundle)
 
     const bullets = [
@@ -385,11 +385,11 @@ describe('runClaimFidelityCheck', () => {
 describe('ArtifactGenerationBrief with evidence cards', () => {
   // SC8: claimGuardrails derived from runtime cards
   it('derives claimGuardrails from evidence cards and includes them in the brief', () => {
-    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-ba')
+    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-secondary')
     const cards = buildQualifiedEvidenceCards(analyticsProfile, analyticsQuestions, analyticsJD, bundle)
 
     const brief = buildArtifactGenerationBrief({
-      sectionType: 'experience-ba',
+      sectionType: 'experience-secondary',
       emphasis: 'BA',
       roleTitle: 'Product Analyst',
       company: 'Target Corp',
@@ -409,7 +409,7 @@ describe('ArtifactGenerationBrief with evidence cards', () => {
   })
 
   it('populates noEvidenceItems for denied/uncertain bridge answers', () => {
-    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-ba')
+    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-secondary')
     const cards = buildQualifiedEvidenceCards(analyticsProfile, analyticsQuestions, analyticsJD, bundle)
     const guardrails = deriveClaimGuardrails(cards)
 
@@ -420,11 +420,11 @@ describe('ArtifactGenerationBrief with evidence cards', () => {
 
   // SC9: CLAIM GUARDRAILS block appears in serialized brief
   it('serializes CLAIM GUARDRAILS section in brief when guardrails exist', () => {
-    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-ba')
+    const bundle = buildScopedEvidenceBundle(analyticsProfile, analyticsQuestions, 'experience-secondary')
     const cards = buildQualifiedEvidenceCards(analyticsProfile, analyticsQuestions, analyticsJD, bundle)
 
     const brief = buildArtifactGenerationBrief({
-      sectionType: 'experience-ba',
+      sectionType: 'experience-secondary',
       emphasis: 'BA',
       roleTitle: 'Product Analyst',
       company: 'Target Corp',
@@ -445,12 +445,12 @@ describe('ArtifactGenerationBrief with evidence cards', () => {
   // Brief without cards still builds correctly (empty guardrails)
   it('builds brief without cards and produces empty guardrails', () => {
     const brief = buildArtifactGenerationBrief({
-      sectionType: 'experience-ba',
+      sectionType: 'experience-secondary',
       emphasis: 'BA',
       roleTitle: 'Product Analyst',
       company: 'Target Corp',
       jdMap: analyticsJD,
-      bundle: buildScopedEvidenceBundle(analyticsProfile, [], 'experience-ba'),
+      bundle: buildScopedEvidenceBundle(analyticsProfile, [], 'experience-secondary'),
       acceptedSignals: [],
       globalSignals: [],
       rejectedPhrases: [],

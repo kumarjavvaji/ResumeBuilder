@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Generation quality gate tests.
  *
  * Validates:
@@ -33,8 +33,8 @@ describe('1. Quality gate constants', () => {
     expect(SUMMARY_PROHIBITIONS).toContain('early career includes')
   })
 
-  it('1.3: SUMMARY_PROHIBITIONS includes GAINSystems', () => {
-    expect(SUMMARY_PROHIBITIONS).toContain('GAINSystems')
+  it('1.3: SUMMARY_PROHIBITIONS includes grounding phrasing', () => {
+    expect(SUMMARY_PROHIBITIONS).toContain('grounding operational')
   })
 
   it('1.4: SUMMARY_PROHIBITIONS includes "grounding operational" phrasing', () => {
@@ -68,9 +68,9 @@ describe('1. Quality gate constants', () => {
 // ─── 2. buildSectionQualityGate ───────────────────────────────────────────────
 
 describe('2. buildSectionQualityGate output', () => {
-  it('2.1: summary gate prohibits GAINSystems', () => {
+  it('2.1: summary gate prohibits older employers not required by JD', () => {
     const gate = buildSectionQualityGate('summary')
-    expect(gate).toContain('GAINSystems')
+    expect(gate).toContain('older employers not required by this JD')
   })
 
   it('2.2: summary gate prohibits "formal PO tenure"', () => {
@@ -88,31 +88,31 @@ describe('2. buildSectionQualityGate output', () => {
     expect(gate).toContain('3–4 lines')
   })
 
-  it('2.5: experience-po gate enforces "~" over "approximately"', () => {
-    const gate = buildSectionQualityGate('experience-po')
+  it('2.5: experience-primary gate enforces "~" over "approximately"', () => {
+    const gate = buildSectionQualityGate('experience-primary')
     expect(gate).toContain('"~"')
     expect(gate).toContain('approximately')
   })
 
-  it('2.6: experience-po gate enforces 1–2 line bullet limit', () => {
-    const gate = buildSectionQualityGate('experience-po')
+  it('2.6: experience-primary gate enforces 1–2 line bullet limit', () => {
+    const gate = buildSectionQualityGate('experience-primary')
     expect(gate).toContain('1–2 lines')
   })
 
-  it('2.7: experience-ba gate prohibits PA Scrum ceremony overclaim', () => {
-    const gate = buildSectionQualityGate('experience-ba')
+  it('2.7: experience-secondary gate prohibits PA Scrum ceremony overclaim', () => {
+    const gate = buildSectionQualityGate('experience-secondary')
     expect(gate).toContain('Led Scrum ceremonies')
     expect(gate).toContain('Owned product roadmap')
     expect(gate).toContain('Managed sprint delivery')
   })
 
-  it('2.8: experience-ba gate provides correct Scrum ceremony phrasing', () => {
-    const gate = buildSectionQualityGate('experience-ba')
+  it('2.8: experience-secondary gate provides correct Scrum ceremony phrasing', () => {
+    const gate = buildSectionQualityGate('experience-secondary')
     expect(gate).toContain('Supported backlog refinement, sprint demos, and ceremony preparation')
   })
 
-  it('2.9: experience-qa gate keeps QA as supporting differentiator', () => {
-    const gate = buildSectionQualityGate('experience-qa')
+  it('2.9: experience-supporting gate keeps QA as supporting differentiator', () => {
+    const gate = buildSectionQualityGate('experience-supporting')
     expect(gate).toContain('supporting differentiator')
   })
 
@@ -129,7 +129,7 @@ describe('2. buildSectionQualityGate output', () => {
   })
 
   it('2.12: all section gates contain the quality gate delimiter', () => {
-    const sections = ['summary', 'skills', 'experience-po', 'experience-ba', 'experience-qa'] as const
+    const sections = ['summary', 'skills', 'experience-primary', 'experience-secondary', 'experience-supporting'] as const
     for (const s of sections) {
       const gate = buildSectionQualityGate(s)
       expect(gate).toContain('QUALITY GATE')
@@ -150,9 +150,9 @@ describe('3. buildFullResumeQualityGate output', () => {
     expect(gate).toContain('formal PO tenure')
   })
 
-  it('3.3: full-resume gate checks for GAINSystems prohibition', () => {
+  it('3.3: full-resume gate prohibits older employers not required by JD', () => {
     const gate = buildFullResumeQualityGate()
-    expect(gate).toContain('GAINSystems')
+    expect(gate).toContain('older employers not relevant to this JD')
   })
 
   it('3.4: full-resume gate checks bullet line limit', () => {
@@ -198,8 +198,8 @@ describe('4. Quality gate wired into generate-artifact-section', () => {
     expect(src).toContain('qualityGate')
   })
 
-  it('4.3: summary typeInstruction prohibits GAINSystems', () => {
-    expect(src).toContain('GAINSystems')
+  it('4.3: summary typeInstruction prohibits older employers not required by JD', () => {
+    expect(src).toContain('older employers not required by this JD')
   })
 
   it('4.4: summary typeInstruction prohibits "formal PO tenure"', () => {
@@ -210,19 +210,19 @@ describe('4. Quality gate wired into generate-artifact-section', () => {
     expect(src).toContain('early career includes')
   })
 
-  it('4.6: experience-po typeInstruction requires "~" for approximations', () => {
+  it('4.6: experience-primary typeInstruction requires "~" for approximations', () => {
     expect(src).toContain('NEVER spell out "approximately"')
   })
 
-  it('4.7: experience-po typeInstruction sets 1–2 line bullet limit', () => {
+  it('4.7: experience-primary typeInstruction sets 1–2 line bullet limit', () => {
     expect(src).toContain('1–2 lines per bullet maximum')
   })
 
-  it('4.8: experience-ba typeInstruction prohibits "Led all Scrum ceremonies"', () => {
+  it('4.8: experience-secondary typeInstruction prohibits "Led all Scrum ceremonies"', () => {
     expect(src).toContain('"Led all Scrum ceremonies"')
   })
 
-  it('4.9: experience-ba typeInstruction provides correct Scrum ceremony phrasing', () => {
+  it('4.9: experience-secondary typeInstruction provides correct Scrum ceremony phrasing', () => {
     expect(src).toContain('Supported backlog refinement, sprint demos, and ceremony preparation')
   })
 
@@ -260,11 +260,11 @@ describe('6. Brief mustAvoid arrays carry quality gate prohibitions', () => {
     expect(src).toContain('"early career includes"')
   })
 
-  it('6.3: summary mustAvoid includes GAINSystems exclusion rule', () => {
-    expect(src).toContain('GAINSystems')
+  it('6.3: summary mustAvoid includes older employer exclusion rule', () => {
+    expect(src).toContain('older employers not relevant to this JD')
   })
 
-  it('6.4: experience-ba mustAvoid includes PA overclaim prohibitions', () => {
+  it('6.4: experience-secondary mustAvoid includes PA overclaim prohibitions', () => {
     expect(src).toContain('"Led all Scrum ceremonies"')
     expect(src).toContain('"Owned product roadmap"')
     expect(src).toContain('"Managed sprint delivery"')

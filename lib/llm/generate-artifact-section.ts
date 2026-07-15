@@ -13,6 +13,7 @@ import type {
   CalibrationInfluence,
   ProfileProjection
 } from '@/contracts'
+import type { FitAnalysisContext, CalibrationRefSlim } from '@/lib/artifacts/buildArtifactRefinementContext'
 import { nanoid } from '@/lib/storage/nanoid'
 import {
   buildScopedEvidenceBundle,
@@ -32,7 +33,7 @@ import {
 } from './artifact-generation-brief'
 import { buildQualifiedEvidenceCards } from './qualified-evidence-cards'
 import { runClaimFidelityCheck } from './claim-fidelity-check'
-import { buildSectionQualityGate } from './generation-quality-gate'
+import { buildSectionQualityGate, type QualityGateContext } from './generation-quality-gate'
 
 export interface GenerateOptions {
   sessionId: string
@@ -64,6 +65,9 @@ export interface GenerateOptions {
   roleTitle?: string
   /** Target company name — included in the brief for contextual framing. */
   company?: string
+  // Stage 3B enrichment: fit intelligence and calibration context assembled client-side
+  fitAnalysisContext?: FitAnalysisContext
+  calibrationRefs?: CalibrationRefSlim[]
 }
 
 export interface GeneratedSection {
@@ -86,6 +90,7 @@ export async function generateArtifactSection(opts: GenerateOptions): Promise<Ge
     refinementInstruction, currentContent, operation = 'generate',
     calibrationSummary, profileProjection,
     roleTitle = '', company = '',
+    fitAnalysisContext, calibrationRefs,
   } = opts
 
   const bundle = buildScopedEvidenceBundle(profile, answeredQuestions, sectionType)
@@ -100,6 +105,10 @@ export async function generateArtifactSection(opts: GenerateOptions): Promise<Ge
     qualifiedEvidenceCards: evidenceCards,
   })
 
+  // Build quality gate context from active profile + JD — makes date ranges, metrics, and
+  // employer exclusions data-driven instead of hardcoded personal literals.
+  const qualityGateCtx = buildQualityGateContextFromProfile(profile, sectionType, jdMap)
+
   const toolSchema = buildToolSchema(sectionType)
   const systemPrompt = buildSystemPrompt(
     sectionType, emphasis, rejectedPhrases, acceptedSignals, globalSignals,
@@ -109,13 +118,15 @@ export async function generateArtifactSection(opts: GenerateOptions): Promise<Ge
     bundle.scope.requiredFramingRules,
     calibrationSummary,
     brief,
+    qualityGateCtx,
   )
   const userContent = buildUserContent({
     sectionType, jdMap, profile,
     bundle,
     companySummary, fitHypothesis, riskGaps,
     profileProjection,
-    refinementInstruction, currentContent, operation
+    refinementInstruction, currentContent, operation,
+    fitAnalysisContext, calibrationRefs,
   })
 
   const response = await anthropic.messages.create({
@@ -178,7 +189,7 @@ export async function generateArtifactSection(opts: GenerateOptions): Promise<Ge
   // For bullet sections, reconstruct content from display-partition bullets only.
   // This ensures the stored content is export-safe and matches what the user sees.
   const isBulletSection = [
-    'experience-po', 'experience-ba', 'experience-qa', 'talking-points'
+    'experience-primary', 'experience-secondary', 'experience-supporting', 'talking-points'
   ].includes(sectionType)
   const displayBullets = finalBullets.filter(b => b.partition === 'display')
   const content = isBulletSection && displayBullets.length > 0
@@ -238,7 +249,8 @@ function buildSystemPrompt(
   disallowedClaimPatterns: string[],
   requiredFramingRules: string[],
   calibrationSummary?: CalibrationSummary,
-  brief?: import('./artifact-generation-brief').ArtifactGenerationBrief
+  brief?: import('./artifact-generation-brief').ArtifactGenerationBrief,
+  qualityGateCtx?: QualityGateContext,
 ): string {
   // Quality gate appended at the end — LLM reads this last before generating
   const rejectedBlock = rejectedPhrases.length
@@ -272,9 +284,9 @@ function buildSystemPrompt(
   const typeInstructions: Record<SectionType, string> = {
     summary: 'Write a compact 3-4 line professional summary. Keep it positioning-level; Experience bullets carry proof details, metrics, tools, cadence, and team sizes. No generic opener or puff language.',
     skills: 'Output compact grouped skill rows from the candidate skillGroups. Format each row as Heading: Skill One, Skill Two. No star ratings, generic soft skills, unsupported tools, or invented skills.',
-    'experience-po': 'Write 3-5 impact-first Product Owner bullets grounded in real work evidence. Emphasize backlog ownership, sprint delivery, stakeholder alignment, prioritization, and outcomes.',
-    'experience-ba': 'Write 3-5 impact-first Product Analyst or Business Analyst bullets grounded in real work evidence. Emphasize requirements, gap analysis, acceptance criteria, UAT, documentation, and release readiness.',
-    'experience-qa': 'Write 3-5 impact-first QA or quality bullets grounded in real work evidence. For product roles, keep QA supportive rather than dominant.',
+    'experience-primary': 'Write 3-5 impact-first bullets for the primary work history role, grounded in real evidence from that work entry. Emphasize scope, outcomes, and the specific value this role delivered.',
+    'experience-secondary': 'Write 3-5 impact-first bullets for the secondary work history role, grounded in real evidence from that entry. Emphasize supporting contributions, analysis, requirements, or delivery — appropriate to this role\'s scope.',
+    'experience-supporting': 'Write 3-5 impact-first bullets for the supporting work history role, grounded in real evidence from that entry. Keep this section focused and non-dominant relative to the primary role.',
     'cover-letter': `Write a cover letter that does NOT recap the resume. Explain why this specific role at this company fits the candidate's career direction. Use the company context and fit hypothesis to ground the argument. 3 short paragraphs max.`,
     'referral-message': `Write a short, direct LinkedIn message to a potential referrer. 4–5 sentences. Personal, specific, no fluff.`,
     'recruiter-message': `Write a recruiter outreach message. 3–4 sentences. State the role, the fit, and ask for a conversation.`,
@@ -288,7 +300,7 @@ function buildSystemPrompt(
 
   const briefBlock = brief ? serializeBriefForPrompt(brief) : ''
 
-  const qualityGate = buildSectionQualityGate(type)
+  const qualityGate = buildSectionQualityGate(type, qualityGateCtx)
 
   return `${briefBlock}You generate targeted resume artifacts for a specific job application.
 
@@ -371,6 +383,8 @@ interface BuildContentOpts {
   currentContent?: string
   operation: 'generate' | 'refine' | 'regenerate'
   profileProjection?: ProfileProjection
+  fitAnalysisContext?: FitAnalysisContext
+  calibrationRefs?: CalibrationRefSlim[]
 }
 
 function buildUserContent(opts: BuildContentOpts): string {
@@ -378,7 +392,7 @@ function buildUserContent(opts: BuildContentOpts): string {
     sectionType, jdMap, profile, bundle,
     companySummary, fitHypothesis, riskGaps,
     refinementInstruction, currentContent, operation,
-    profileProjection
+    profileProjection, fitAnalysisContext, calibrationRefs,
   } = opts
 
   const lines: string[] = [`Generate section: ${sectionType}  [operation: ${operation}]`, '']
@@ -440,11 +454,10 @@ function buildUserContent(opts: BuildContentOpts): string {
   if (bundle.normalizedBridgeEvidence.length > 0) {
     lines.push('Bridge question answers (scoped evidence for this section):')
     for (const n of bundle.normalizedBridgeEvidence) {
+      lines.push(`  Q [${n.questionType}]: "${n.originalQuestion}"`)
+      lines.push(`  Evidence: ${n.normalizedEvidenceStatement}`)
       if (n.forbiddenOverclaim.length > 0) {
-        lines.push(`  Evidence: ${n.normalizedEvidenceStatement}`)
         lines.push(`  Forbidden overclaim: do NOT claim ${n.forbiddenOverclaim.join('; ')}`)
-      } else {
-        lines.push(`  Evidence: ${n.normalizedEvidenceStatement}`)
       }
       if (n.limitations.length > 0) {
         lines.push(`  Limitation: ${n.limitations.join('; ')}`)
@@ -459,6 +472,94 @@ function buildUserContent(opts: BuildContentOpts): string {
       lines.push(`  [User expressed uncertainty] ${n.normalizedEvidenceStatement}`)
     }
     lines.push('')
+  }
+
+  // ── Fit analysis context (per-requirement assessment from Stage 1) ─────────
+  if (fitAnalysisContext) {
+    if (fitAnalysisContext.requirements.length > 0) {
+      lines.push('Fit analysis per requirement (Stage 1 assessment — use to prioritize and calibrate framing):')
+      for (const r of fitAnalysisContext.requirements) {
+        lines.push(`  Requirement: ${r.requirementText}`)
+        if (r.classification) lines.push(`    Classification: ${r.classification}`)
+        if (r.profileEvidenceStrength) lines.push(`    Evidence strength: ${r.profileEvidenceStrength}`)
+        if (r.quickDiqGrounding) lines.push(`    Quick-DIQ grounding: ${r.quickDiqGrounding}`)
+        if (r.calibratedFitInterpretation) lines.push(`    Calibrated interpretation: ${r.calibratedFitInterpretation}`)
+      }
+      lines.push('')
+    }
+
+    const gs = fitAnalysisContext.gapSummary
+    if (gs) {
+      if (gs.trueGaps.length) {
+        lines.push('True gaps (no evidence — handle honestly, do not fabricate):')
+        for (const g of gs.trueGaps) lines.push(`  - ${g}`)
+        lines.push('')
+      }
+      if (gs.needsConfirmation.length) {
+        lines.push('Needs confirmation (weak or inferred evidence):')
+        for (const g of gs.needsConfirmation) lines.push(`  - ${g}`)
+        lines.push('')
+      }
+      if (gs.wordingOrMapping.length) {
+        lines.push('Wording/mapping gaps (candidate has the experience but terms differ):')
+        for (const g of gs.wordingOrMapping) lines.push(`  - ${g}`)
+        lines.push('')
+      }
+    }
+
+    const cb = fitAnalysisContext.calibrationBrief
+    if (cb) {
+      lines.push('Quick-DIQ context (company/domain signals from Stage 1):')
+      if (cb.companyContext) lines.push(`  Company context: ${cb.companyContext}`)
+      if (cb.domainContext) lines.push(`  Domain context: ${cb.domainContext}`)
+      if (cb.roleProblemSpace) lines.push(`  Role problem space: ${cb.roleProblemSpace}`)
+      if (cb.likelyHiringPriorities?.length) lines.push(`  Hiring priorities: ${cb.likelyHiringPriorities.join(', ')}`)
+      if (cb.deliverySignals?.length) {
+        lines.push('  Delivery signals:')
+        for (const s of cb.deliverySignals) lines.push(`    - ${s}`)
+      }
+      if (cb.stakeholderSignals?.length) {
+        lines.push('  Stakeholder signals:')
+        for (const s of cb.stakeholderSignals) lines.push(`    - ${s}`)
+      }
+      if (cb.analyticsReportingSignals?.length) {
+        lines.push('  Analytics/reporting signals:')
+        for (const s of cb.analyticsReportingSignals) lines.push(`    - ${s}`)
+      }
+      if (cb.resumeCalibrationImplications?.length) {
+        lines.push('  Resume calibration implications:')
+        for (const s of cb.resumeCalibrationImplications) lines.push(`    - ${s}`)
+      }
+      lines.push('')
+    }
+  }
+
+  // ── Applied calibration refs (individual market peers, strategy only) ───────
+  if (calibrationRefs && calibrationRefs.length > 0) {
+    const activeRefs = calibrationRefs.filter(r => r.calibrationGroup !== 'rejected')
+    if (activeRefs.length > 0) {
+      lines.push('Applied calibration references (market benchmarks — NOT user evidence; never cite in sourceMappings or evidenceRef):')
+      for (const ref of activeRefs) {
+        const refType = ref.matchType === 'target_company' ? 'target company' : 'comparable'
+        const group = ref.calibrationGroup ?? 'supporting'
+        lines.push(`  [${refType}/${group}] ${ref.title} at ${ref.company} (confidence: ${ref.confidence})`)
+        lines.push(`    Match reason: ${ref.matchReason}`)
+        if (ref.limitations) lines.push(`    Limitation: ${ref.limitations}`)
+        if (ref.manualContext) {
+          lines.push(`    Manually enriched profile context (calibration reference only — do NOT treat as user evidence):`)
+          lines.push(`      ${ref.manualContext.slice(0, 600)}${ref.manualContext.length > 600 ? '…' : ''}`)
+        }
+        if (group === 'primary') {
+          lines.push(`    Calibration use: voice/framing, keyword emphasis, and seniority language — full calibration use permitted.`)
+        } else if (group === 'supporting') {
+          lines.push(`    Calibration use: domain vocabulary and workflow framing only — do NOT use for title or seniority claims.`)
+        } else if (group === 'context_only') {
+          lines.push(`    Calibration use: company/domain background only — do NOT use to shape candidate seniority, title wording, or skill claims.`)
+        }
+      }
+      lines.push('BOUNDARY: Use these only to calibrate language, emphasis, and role framing. Never cite company names, people, or match reasons inside the artifact.')
+      lines.push('')
+    }
   }
 
   // ── Profile snapshot evidence (layered profile, if available) ──────────────
@@ -499,6 +600,50 @@ function buildUserContent(opts: BuildContentOpts): string {
   return lines.join('\n')
 }
 
+/**
+ * Builds a QualityGateContext from the active user profile and JD.
+ * Used to replace static personal literals in quality gate instructions with
+ * values loaded at runtime from the user's own work history.
+ */
+function buildQualityGateContextFromProfile(
+  profile: UserProfile,
+  sectionType: SectionType,
+  jdMap: JDRequirementMap
+): QualityGateContext {
+  const ctx: QualityGateContext = {}
+
+  if (sectionType === 'experience-primary') {
+    // Use the first work history entry as the primary role (or the most recent one)
+    const primaryEntry = profile.workHistory[0]
+    if (primaryEntry) {
+      const endLabel = primaryEntry.endDate === 'present' ? 'present' : primaryEntry.endDate
+      ctx.poDateRange = `${primaryEntry.startDate} – ${endLabel}`
+      ctx.verifiedMetrics = (primaryEntry.approvedMetrics ?? []).slice(0, 3)
+    }
+  }
+
+  if (sectionType === 'summary') {
+    const jdText = [...jdMap.required, ...jdMap.niceToHave].map(r => r.text).join(' ').toLowerCase()
+    const primaryKeywords = ['product owner', 'product manager', 'business analyst',
+      'product analyst', 'systems analyst', 'data analyst', 'supporting', 'quality']
+    const seen = new Set<string>()
+    const excluded: string[] = []
+    for (const w of profile.workHistory) {
+      if (seen.has(w.company)) continue
+      const titleLower = w.title.toLowerCase()
+      const isPrimary = primaryKeywords.some(kw => titleLower.includes(kw))
+      if (isPrimary) { seen.add(w.company); continue }
+      const domain = (w.domain ?? '').toLowerCase()
+      const domainWords = domain.split(/\W+/).filter(word => word.length > 3)
+      const jdRelevant = domainWords.some(word => jdText.includes(word))
+      if (!jdRelevant) { excluded.push(w.company); seen.add(w.company) }
+    }
+    if (excluded.length > 0) ctx.olderEmployersToExclude = excluded
+  }
+
+  return ctx
+}
+
 // Format grouped skills; falls back to flat list for legacy profiles
 function formatSkillsForPrompt(profile: UserProfile): string[] {
   const groups = profile.skillGroups?.filter(g => g.skills.length > 0) ?? []
@@ -512,7 +657,7 @@ function formatSkillsForPrompt(profile: UserProfile): string[] {
 
 function buildToolSchema(type: SectionType) {
   const hasBullets = [
-    'experience-po', 'experience-ba', 'experience-qa', 'talking-points'
+    'experience-primary', 'experience-secondary', 'experience-supporting', 'talking-points'
   ].includes(type)
 
   return {

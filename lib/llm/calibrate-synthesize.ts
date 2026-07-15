@@ -56,12 +56,25 @@ export async function synthesizeCalibration(opts: SynthesizeOpts): Promise<Calib
     return emptyCalibrationSummary(now)
   }
 
-  const refLines = refs.map((r, i) => [
-    `[${i + 1}] ${r.title} at ${r.company} (${r.matchType})`,
-    `  Match reason: ${r.matchReason}`,
-    `  Snippet: ${r.snippetOrSummary.slice(0, 400)}`,
-    r.limitations ? `  Limitations: ${r.limitations}` : ''
-  ].filter(Boolean).join('\n')).join('\n\n')
+  // Only synthesize from active refs — rejected refs must not influence the summary
+  const activeRefs = refs.filter(r => r.calibrationGroup !== 'rejected')
+  if (activeRefs.length === 0) return emptyCalibrationSummary(now)
+
+  const refLines = activeRefs.map((r, i) => {
+    const groupLabel = r.calibrationGroup ? ` [${r.calibrationGroup}]` : ''
+    const depthLabel = r.sourceDepth ? ` depth:${r.sourceDepth}` : ''
+    const snippet = r.manualContext
+      ? `${r.snippetOrSummary.slice(0, 200)}\n  [Manual context]: ${r.manualContext.slice(0, 400)}`
+      : r.snippetOrSummary.slice(0, 400)
+    return [
+      `[${i + 1}] ${r.title} at ${r.company} (${r.matchType}${groupLabel}${depthLabel})`,
+      `  Match reason: ${r.matchReason}`,
+      r.jdAlignmentElements?.length ? `  Aligns with JD: ${r.jdAlignmentElements.join(', ')}` : '',
+      `  Snippet: ${snippet}`,
+      r.useFor?.length ? `  Use for: ${r.useFor.join('; ')}` : '',
+      r.limitations ? `  Limitations: ${r.limitations}` : '',
+    ].filter(Boolean).join('\n')
+  }).join('\n\n')
 
   const userContent = [
     `Target company: ${targetCompany}`,

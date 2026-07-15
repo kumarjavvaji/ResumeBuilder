@@ -6,21 +6,48 @@ import { saveSession } from '@/lib/storage/sessions'
 import { nanoid } from '@/lib/storage/nanoid'
 import { getActiveSnapshot } from '@/lib/profile/profileSnapshotStore'
 import { buildEvidenceIndex } from '@/lib/profile/profileProjectionService'
+import {
+  createStage1Job,
+  getStage1Job,
+  updateStage1JobPass,
+  setStage1JobComplete,
+  setStage1JobFailed,
+  getActiveJobId,
+  setActiveJobId,
+  clearActiveJobId,
+} from '@/lib/storage/stage1-jobs'
 import type {
   TargetIntake,
   Stage1Status,
   JDSourceType,
+  UserProfile,
+  ProfileEvidenceIndexItem,
   RawJD,
   JDRequirementMap,
   DomainIQImport,
   FitAnalysis,
-  UserProfile,
-  ProfileEvidenceIndexItem,
+  Stage1StepId,
+  Stage1StepStatus,
+  Stage1ProgressStep,
+  Stage1Job,
+  Stage1PassKey,
+  CandidateProfileMap,
+  ValidatedProfileClaims,
+  JDRequirementMapExtended,
+  MatchMatrix,
+  GapFitAnalysis,
+  Stage2QuestionCandidate,
 } from '@/contracts'
 import { deriveStageStatuses, canCompleteStage1 } from '@/contracts'
+import type { Stage1PipelineResult } from '@/lib/llm/stage1/pipeline'
 import { Spinner } from '@/components/shared/spinner'
 import { inputCls, textareaCls } from '@/lib/input-cls'
-import { JDRequirementMapView } from './jd-requirement-map-view'
+import {
+  JDRequirementMapView,
+  canonicalRequirementSources,
+  resolveRequirementDisplayItems,
+  type RequirementDisplaySource,
+} from './jd-requirement-map-view'
 import { findFindingByTopic, TraceChip, TraceableBullet, computeUnmatchedFindings, UnmatchedFindingsDebug } from './stage1-findings-view'
 
 // ─── Stage1Status derivation ──────────────────────────────────────────────────
@@ -602,8 +629,8 @@ function DomainIQSection({
             </div>
             <div>
               <label className="block text-xs font-medium text-blue-950 mb-1">User notes (optional)</label>
-              <input
-                className={inputCls}
+              <textarea
+                className={`${textareaCls} min-h-[88px] resize-y`}
                 value={quickNotes}
                 onChange={e => setQuickNotes(e.target.value)}
                 placeholder="Known workflows, users, risks, or priorities"
@@ -824,6 +851,204 @@ const EMPTY_REQUIREMENT_MAP: JDRequirementMap = {
   weaklySupportedRequirements: [],
 }
 
+// ─── JD payload validation ────────────────────────────────────────────────────
+
+const INSTRUCTION_MARKERS = [
+  'Stage 1 Analyze JD Button Status Tracking',
+  'Stage 1 Refactor',
+  'Refactor ResumeBuilder',
+  'Implementation Boundary',
+  'ResumeBuilder source logic owns',
+  'Anthropic LLM does not own status state',
+  'Acceptance Criteria',
+  'Multi-Pass Architecture',
+  'Pass A – Candidate Profile Map',
+  'Pass B – Claim Validation',
+  'Pass C – JD Requirement Map',
+]
+
+function validateJDText(jdText: string): string | null {
+  const text = jdText.trim()
+  if (text.length < 200) return 'Job description is too short. Paste the full JD text.'
+  for (const marker of INSTRUCTION_MARKERS) {
+    if (text.includes(marker)) {
+      return `The JD field appears to contain implementation notes rather than a job description (found: "${marker.slice(0, 50)}…"). Clear the JD field and paste the actual job posting.`
+    }
+  }
+  return null
+}
+
+// ─── Job → progress step mapping ─────────────────────────────────────────────
+
+const PASS_TO_STEPS: Record<Stage1PassKey, Stage1StepId[]> = {
+  profileMap:      ['buildingCandidateProfileMap'],
+  jdMap:           ['analyzingJDRequirements'],
+  claimValidation: ['validatingProfileClaims'],
+  matchMatrix:     ['matchingProfileToJD'],
+  gapFit:          ['generatingGapFitAnalysis'],
+  bridgeQuestions: ['generatingBridgeQuestions'],
+  assembly:        ['savingResults', 'renderingArtifact'],
+}
+
+function jobToProgressSteps(job: Stage1Job): Stage1ProgressStep[] {
+  const steps = makeInitialSteps()
+  // loadingProfileEvidence — completed if any pass has started
+  const anyStarted = Object.values(job.passes).some(p => p.status !== 'not_started')
+  return steps.map(step => {
+    if (step.id === 'loadingProfileEvidence') {
+      return { ...step, status: anyStarted ? 'completed' : 'not_started' }
+    }
+    for (const [passKey, stepIds] of Object.entries(PASS_TO_STEPS) as [Stage1PassKey, Stage1StepId[]][]) {
+      if (stepIds.includes(step.id)) {
+        const pass = job.passes[passKey]
+        return { ...step, status: pass.status, error: pass.errorMessage }
+      }
+    }
+    return step
+  })
+}
+
+// ─── JD Source Confirmation Panel ────────────────────────────────────────────
+
+function JDSourceConfirmation({
+  jdText,
+  jdSourceType,
+  roleTitle,
+  company,
+  evidenceCount,
+}: {
+  jdText: string
+  jdSourceType: JDSourceType
+  roleTitle: string
+  company: string
+  evidenceCount: number
+}) {
+  const sourceLabel: Record<JDSourceType, string> = {
+    pasted_jd: 'Pasted Job Description',
+    fetched_jd: 'Fetched from URL',
+    structured_fields: 'Assembled from Fields',
+    domainiq: 'DomainIQ Import',
+    company_notes: 'Company Notes',
+    inference: 'Inferred',
+  }
+  const validationError = validateJDText(jdText)
+  const preview = jdText.trim().slice(0, 200).replace(/\s+/g, ' ')
+
+  return (
+    <div className={`rounded-lg border px-4 py-3 space-y-2 text-xs ${validationError ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-gray-50'}`}>
+      <p className={`font-semibold ${validationError ? 'text-red-700' : 'text-gray-700'}`}>
+        Stage 1 Payload Preview
+      </p>
+      {validationError ? (
+        <p className="text-red-600">{validationError}</p>
+      ) : (
+        <div className="space-y-1 text-gray-600">
+          <p><span className="font-medium text-gray-500">JD Source:</span> {sourceLabel[jdSourceType] ?? jdSourceType}</p>
+          <p><span className="font-medium text-gray-500">JD Length:</span> {jdText.trim().length.toLocaleString()} characters</p>
+          <p><span className="font-medium text-gray-500">Role:</span> {roleTitle || '—'}</p>
+          <p><span className="font-medium text-gray-500">Company:</span> {company || '—'}</p>
+          <p><span className="font-medium text-gray-500">Profile Evidence:</span> {evidenceCount} items loaded</p>
+          <p className="font-medium text-gray-500">JD Preview:</p>
+          <p className="text-gray-400 italic">"{preview}{jdText.trim().length > 200 ? '…' : ''}"</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Stage 1 Progress Panel ───────────────────────────────────────────────────
+
+const STEP_LABELS: Record<Stage1StepId, string> = {
+  loadingProfileEvidence:    'Loading Profile Evidence',
+  buildingCandidateProfileMap: 'Building Candidate Profile Map',
+  analyzingJDRequirements:   'Analyzing JD Requirements',
+  validatingProfileClaims:   'Validating Profile Claims',
+  matchingProfileToJD:       'Matching Profile to JD',
+  generatingGapFitAnalysis:  'Generating Gap-Fit Analysis',
+  generatingBridgeQuestions: 'Generating Stage 2 Bridge Questions',
+  savingResults:             'Saving Stage 1 Results',
+  renderingArtifact:         'Rendering Stage 1 Artifact',
+}
+
+const STEP_ORDER: Stage1StepId[] = [
+  'loadingProfileEvidence',
+  'buildingCandidateProfileMap',
+  'analyzingJDRequirements',
+  'validatingProfileClaims',
+  'matchingProfileToJD',
+  'generatingGapFitAnalysis',
+  'generatingBridgeQuestions',
+  'savingResults',
+  'renderingArtifact',
+]
+
+function makeInitialSteps(): Stage1ProgressStep[] {
+  return STEP_ORDER.map(id => ({ id, label: STEP_LABELS[id], status: 'not_started' as Stage1StepStatus }))
+}
+
+function StepStatusIcon({ status }: { status: Stage1StepStatus }) {
+  if (status === 'completed') return <span className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center text-white text-xs shrink-0">✓</span>
+  if (status === 'failed') return <span className="w-5 h-5 rounded-full bg-red-500 flex items-center justify-center text-white text-xs shrink-0">✗</span>
+  if (status === 'in_progress') return <Spinner className="text-gray-900 h-4 w-4 shrink-0" />
+  return <span className="w-5 h-5 rounded-full border-2 border-gray-200 shrink-0" />
+}
+
+function Stage1ProgressPanel({ steps }: { steps: Stage1ProgressStep[] }) {
+  const activeStep = steps.find(s => s.status === 'in_progress')
+  return (
+    <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
+      <div className="px-4 py-3 bg-gray-50 border-b border-gray-100">
+        <h3 className="text-sm font-semibold text-gray-800">Stage 1 Analysis Pipeline</h3>
+        {activeStep && (
+          <p className="text-xs text-gray-500 mt-0.5">{STEP_LABELS[activeStep.id]}…</p>
+        )}
+      </div>
+      <div className="divide-y divide-gray-50">
+        {steps.map(step => (
+          <div key={step.id} className={`flex items-start gap-3 px-4 py-2.5 ${step.status === 'in_progress' ? 'bg-blue-50/40' : ''}`}>
+            <div className="mt-0.5">
+              <StepStatusIcon status={step.status} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className={`text-sm ${
+                step.status === 'in_progress' ? 'text-gray-900 font-medium' :
+                step.status === 'completed' ? 'text-gray-500' :
+                step.status === 'failed' ? 'text-red-600 font-medium' :
+                'text-gray-300'
+              }`}>
+                {step.label}
+              </span>
+              {step.error && <p className="text-xs text-red-500 mt-0.5">{step.error}</p>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── Per-pass fetch helpers ───────────────────────────────────────────────────
+
+async function callPassRoute<T>(
+  url: string,
+  body: object,
+): Promise<T> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const json = await res.json()
+  if (!res.ok) {
+    const err = Object.assign(new Error(json.error ?? `${url} failed`), {
+      rawOutput: json.rawOutput,
+      validationErrors: json.validationErrors,
+    })
+    throw err
+  }
+  return json.output as T
+}
+
 // ─── Main form ────────────────────────────────────────────────────────────────
 
 export function IntakeForm() {
@@ -849,8 +1074,46 @@ export function IntakeForm() {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [result, setResult] = useState<null | Awaited<ReturnType<typeof runIntake>>>(null)
+  const [result, setResult] = useState<Stage1PipelineResult | null>(null)
   const [showTrace, setShowTrace] = useState(false)
+  const [progressSteps, setProgressSteps] = useState<Stage1ProgressStep[]>(makeInitialSteps())
+  const [profileEvidenceCount, setProfileEvidenceCount] = useState(0)
+  const [stage1Job, setStage1Job] = useState<Stage1Job | null>(null)
+  const [failedPass, setFailedPass] = useState<Stage1PassKey | null>(null)
+
+  useEffect(() => {
+    getActiveSnapshot().then(snap => {
+      if (snap) setProfileEvidenceCount(buildEvidenceIndex(snap).length)
+    })
+    // Restore in-progress job on page refresh
+    const activeId = getActiveJobId()
+    if (activeId) {
+      getStage1Job(activeId).then(job => {
+        if (job && job.status === 'running') {
+          setStage1Job(job)
+          setProgressSteps(jobToProgressSteps(job))
+          // Restore form fields from job
+          setRoleTitle(job.roleTitle)
+          setCompany(job.company)
+          setJDText(job.jdText)
+          setJDSourceType(job.jdSourceType)
+          setDomainIQText(job.domainIQText)
+        } else if (job && job.status === 'completed' && job.finalArtifact) {
+          setStage1Job(job)
+          setResult(job.finalArtifact as Stage1PipelineResult)
+          setProgressSteps(jobToProgressSteps(job))
+          setRoleTitle(job.roleTitle)
+          setCompany(job.company)
+          setJDText(job.jdText)
+          setJDSourceType(job.jdSourceType)
+          setDomainIQText(job.domainIQText)
+        } else {
+          // Failed or missing jobs cannot be rehydrated into a completed review state.
+          clearActiveJobId()
+        }
+      })
+    }
+  }, [])
 
   const stage1Status = deriveStage1Status({
     jdText,
@@ -871,10 +1134,102 @@ export function IntakeForm() {
     setJDMode('paste')  // open paste collapse automatically
   }
 
+  async function runPipeline(job: Stage1Job) {
+    const now = () => new Date().toISOString()
+
+    async function runPass<T>(
+      passKey: Stage1PassKey,
+      url: string,
+      body: object,
+    ): Promise<T> {
+      const updated = await updateStage1JobPass(job.id, passKey, { status: 'in_progress', startedAt: now() })
+      if (updated) { setStage1Job(updated); setProgressSteps(jobToProgressSteps(updated)) }
+
+      try {
+        const output = await callPassRoute<T>(url, body)
+        const done = await updateStage1JobPass(job.id, passKey, { status: 'completed', output, completedAt: now() })
+        if (done) { setStage1Job(done); setProgressSteps(jobToProgressSteps(done)) }
+        return output
+      } catch (err: any) {
+        const failed = await updateStage1JobPass(job.id, passKey, {
+          status: 'failed',
+          errorMessage: err.message,
+          rawOutput: err.rawOutput,
+          validationErrors: err.validationErrors,
+          retryCount: (job.passes[passKey].retryCount ?? 0) + 1,
+        })
+        if (failed) { setStage1Job(failed); setProgressSteps(jobToProgressSteps(failed)) }
+        await setStage1JobFailed(job.id)
+        setFailedPass(passKey)
+        throw err
+      }
+    }
+
+    // Mark evidence loaded
+    setProgressSteps(prev => prev.map(s => s.id === 'loadingProfileEvidence' ? { ...s, status: 'completed' } : s))
+
+    // Pass A and C — parallel, independent
+    const [profileMap, jdMap] = await Promise.all([
+      runPass<CandidateProfileMap>('profileMap', '/api/stage1/pass/profile-map', {
+        profile: job.profile,
+        profileEvidenceIndex: job.profileEvidenceIndex,
+        bridgeAnswers: job.bridgeAnswers,
+        acceptedArtifacts: job.acceptedArtifacts,
+      }),
+      runPass<JDRequirementMapExtended>('jdMap', '/api/stage1/pass/jd-map', {
+        jdText: job.jdText,
+        domainIQText: job.domainIQText,
+      }),
+    ])
+
+    // Pass B — depends on A
+    const validatedClaims = await runPass<ValidatedProfileClaims>('claimValidation', '/api/stage1/pass/claim-validation', {
+      profileMap,
+      skills: job.profile.skills,
+      certifications: job.profile.certifications,
+    })
+
+    // Pass D — depends on B and C
+    const matchMatrix = await runPass<MatchMatrix>('matchMatrix', '/api/stage1/pass/match-matrix', {
+      validatedClaims,
+      jdMap,
+    })
+
+    // Pass E — depends on D
+    const gapFitAnalysis = await runPass<GapFitAnalysis>('gapFit', '/api/stage1/pass/gap-fit', {
+      matchMatrix,
+      validatedClaims,
+    })
+
+    // Pass F — depends on E
+    const bridgeQuestions = await runPass<Stage2QuestionCandidate[]>('bridgeQuestions', '/api/stage1/pass/bridge-questions', {
+      gapFitAnalysis,
+      validatedClaims,
+    })
+
+    // Assembly — final artifact
+    const finalResult = await runPass<Stage1PipelineResult>('assembly', '/api/stage1/assemble', {
+      profileMap,
+      validatedClaims,
+      jdMapExtended: jdMap,
+      matchMatrix,
+      gapFitAnalysis,
+      bridgeQuestions,
+      jdText: job.jdText,
+      domainIQText: job.domainIQText,
+      profile: job.profile,
+      jdSourceType: job.jdSourceType,
+      evidenceIndex: job.profileEvidenceIndex,
+    })
+
+    await setStage1JobComplete(job.id, finalResult)
+    setResult(finalResult)
+  }
+
   async function handleAnalyze() {
     setError('')
+    setFailedPass(null)
 
-    // Guard: must have valid JD text to proceed
     if (!jdText.trim()) {
       setError('Paste the job description to continue.')
       return
@@ -884,20 +1239,134 @@ export function IntakeForm() {
       return
     }
 
-    const profile = await getUserProfile()
-    if (!profile) {
+    const jdValidationError = validateJDText(jdText)
+    if (jdValidationError) {
+      setError(jdValidationError)
+      return
+    }
+
+    const profileData = await getUserProfile()
+    if (!profileData) {
       setError('Please complete your profile before creating a session.')
       return
     }
 
     setLoading(true)
+    setResult(null)
+    setProgressSteps(makeInitialSteps())
+
     try {
       const snapshot = await getActiveSnapshot()
       const profileEvidenceIndex = snapshot ? buildEvidenceIndex(snapshot) : []
-      const data = await runIntake(jdText, domainIQText, profile, jdSourceType, roleTitle, company, profileEvidenceIndex)
-      setResult(data)
+
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[Stage1 intake payload]', {
+          company, roleTitle, jdSource: jdSourceType,
+          jdTextLength: jdText?.length, jdTextPreview: jdText?.slice(0, 300),
+          hasProfile: Boolean(profileData), profileEvidenceCount: profileEvidenceIndex?.length ?? 0,
+          hasDomainIQ: Boolean(domainIQText?.trim()),
+        })
+      }
+
+      const job = await createStage1Job({
+        company, roleTitle, jdText, jdSourceType, domainIQText,
+        profile: profileData, profileEvidenceIndex,
+      })
+      setStage1Job(job)
+      setActiveJobId(job.id)
+
+      await runPipeline(job)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Analysis failed.')
+      if (!failedPass) {
+        // Only set generic error if we haven't already marked a specific pass as failed
+        setError(err instanceof Error ? err.message : 'Analysis failed.')
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleRetryPass() {
+    if (!stage1Job || !failedPass) return
+    setError('')
+    setLoading(true)
+
+    try {
+      // Reload job state from DB to get latest outputs from completed passes
+      const freshJob = await getStage1Job(stage1Job.id)
+      if (!freshJob) { setError('Job not found.'); return }
+
+      // Update job status back to running so pipeline can continue
+      const updatedJob = await updateStage1JobPass(freshJob.id, failedPass, {
+        status: 'not_started',
+        errorMessage: undefined,
+        retryCount: (freshJob.passes[failedPass].retryCount ?? 0),
+      })
+      const jobToRun = updatedJob ?? freshJob
+      setStage1Job(jobToRun)
+      setFailedPass(null)
+      setProgressSteps(jobToProgressSteps(jobToRun))
+
+      // Re-enter pipeline from the failed pass using saved prior outputs
+      const getOutput = <T,>(key: Stage1PassKey): T => freshJob.passes[key].output as T
+
+      const now = () => new Date().toISOString()
+      const runPassRetry = async <T,>(passKey: Stage1PassKey, url: string, body: object): Promise<T> => {
+        if (freshJob.passes[passKey].status === 'completed') {
+          return getOutput<T>(passKey)
+        }
+        const upd = await updateStage1JobPass(jobToRun.id, passKey, { status: 'in_progress', startedAt: now() })
+        if (upd) { setStage1Job(upd); setProgressSteps(jobToProgressSteps(upd)) }
+        try {
+          const output = await callPassRoute<T>(url, body)
+          const done = await updateStage1JobPass(jobToRun.id, passKey, { status: 'completed', output, completedAt: now() })
+          if (done) { setStage1Job(done); setProgressSteps(jobToProgressSteps(done)) }
+          return output
+        } catch (err: any) {
+          const failed = await updateStage1JobPass(jobToRun.id, passKey, {
+            status: 'failed', errorMessage: err.message, rawOutput: err.rawOutput,
+            validationErrors: err.validationErrors,
+            retryCount: (jobToRun.passes[passKey].retryCount ?? 0) + 1,
+          })
+          if (failed) { setStage1Job(failed); setProgressSteps(jobToProgressSteps(failed)) }
+          await setStage1JobFailed(jobToRun.id)
+          setFailedPass(passKey)
+          throw err
+        }
+      }
+
+      const profileMap = await runPassRetry<CandidateProfileMap>('profileMap', '/api/stage1/pass/profile-map', {
+        profile: freshJob.profile, profileEvidenceIndex: freshJob.profileEvidenceIndex,
+        bridgeAnswers: freshJob.bridgeAnswers, acceptedArtifacts: freshJob.acceptedArtifacts,
+      })
+      const [, jdMap] = await Promise.all([
+        Promise.resolve(profileMap),
+        runPassRetry<JDRequirementMapExtended>('jdMap', '/api/stage1/pass/jd-map', {
+          jdText: freshJob.jdText, domainIQText: freshJob.domainIQText,
+        }),
+      ])
+      const validatedClaims = await runPassRetry<ValidatedProfileClaims>('claimValidation', '/api/stage1/pass/claim-validation', {
+        profileMap, skills: freshJob.profile.skills, certifications: freshJob.profile.certifications,
+      })
+      const matchMatrix = await runPassRetry<MatchMatrix>('matchMatrix', '/api/stage1/pass/match-matrix', {
+        validatedClaims, jdMap,
+      })
+      const gapFitAnalysis = await runPassRetry<GapFitAnalysis>('gapFit', '/api/stage1/pass/gap-fit', {
+        matchMatrix, validatedClaims,
+      })
+      const bridgeQuestions = await runPassRetry<Stage2QuestionCandidate[]>('bridgeQuestions', '/api/stage1/pass/bridge-questions', {
+        gapFitAnalysis, validatedClaims,
+      })
+      const finalResult = await runPassRetry<Stage1PipelineResult>('assembly', '/api/stage1/assemble', {
+        profileMap, validatedClaims, jdMapExtended: jdMap, matchMatrix, gapFitAnalysis, bridgeQuestions,
+        jdText: freshJob.jdText, domainIQText: freshJob.domainIQText, profile: freshJob.profile,
+        jdSourceType: freshJob.jdSourceType, evidenceIndex: freshJob.profileEvidenceIndex,
+      })
+
+      await setStage1JobComplete(jobToRun.id, finalResult)
+      setResult(finalResult)
+    } catch (err) {
+      if (!failedPass) setError(err instanceof Error ? err.message : 'Retry failed.')
     } finally {
       setLoading(false)
     }
@@ -934,10 +1403,13 @@ export function IntakeForm() {
         riskGaps: result.synthesis.riskGaps,
         emphasisRecommendation: result.synthesis.emphasisRecommendation,
         fitAnalysis: result.fitAnalysis,
+        // Link to Stage1Job so Stage 2 can read Pass F output for provenance-aware questions
+        stage1JobId: stage1Job?.id,
         status: 'intake',
         stageStatuses: deriveStageStatuses('intake'),
       }
       await saveSession(session)
+      clearActiveJobId()
       router.push(`/sessions/${session.id}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save session. Please try again.')
@@ -1014,6 +1486,16 @@ export function IntakeForm() {
         jdText={jdText}
       />
 
+      {jdText.trim() && (
+        <JDSourceConfirmation
+          jdText={jdText}
+          jdSourceType={jdSourceType}
+          roleTitle={roleTitle}
+          company={company}
+          evidenceCount={profileEvidenceCount}
+        />
+      )}
+
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       {/* CTAs — driven by stage1Status */}
@@ -1061,6 +1543,26 @@ export function IntakeForm() {
           )}
       </div>
 
+      {/* Progress panel — visible while loading or when a pass has failed */}
+      {(loading || failedPass) && (
+        <div className="space-y-3">
+          <Stage1ProgressPanel steps={progressSteps} />
+          {failedPass && !loading && (
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleRetryPass}
+                className="px-4 py-2 bg-amber-600 text-white rounded text-sm font-medium hover:bg-amber-500"
+              >
+                Retry {STEP_LABELS[PASS_TO_STEPS[failedPass][0]] ?? failedPass}
+              </button>
+              <p className="text-xs text-gray-500">
+                Completed passes are preserved — only the failed pass will rerun.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
       {result && (
         <div className="mt-8 space-y-8">
           <div className="flex justify-end">
@@ -1073,7 +1575,12 @@ export function IntakeForm() {
               Show evidence trace
             </label>
           </div>
-          <IntakeSynthesisView synthesis={result.synthesis} findings={result.fitAnalysis?.findings} showTrace={showTrace} />
+          <IntakeSynthesisView
+            synthesis={result.synthesis}
+            findings={result.fitAnalysis?.findings}
+            showTrace={showTrace}
+            requirementSources={canonicalRequirementSources(result.requirementMap, result.fitAnalysis?.requirements)}
+          />
           <JDRequirementMapView map={result.requirementMap} findings={result.fitAnalysis?.findings} showTrace={showTrace} />
           {showTrace && (
             <UnmatchedFindingsDebug
@@ -1097,17 +1604,52 @@ function IntakeSynthesisView({
   synthesis,
   findings,
   showTrace,
+  requirementSources,
 }: {
   synthesis: {
     companySummary: string
     fitHypothesis: string
     riskGaps: string[]
     emphasisRecommendation: string
+    riskGapBreakdown?: {
+      trueCandidateGaps: string[]
+      weakButBridgeable: string[]
+      retrievalGaps: string[]
+    }
+    resumeDirection?: {
+      summaryGuidance: string
+      skillsGuidance: string
+      experienceBulletGuidance: string[]
+    }
+    qualityAudit?: {
+      compoundRequirementsSplit: string[]
+      contradictionsResolved: string[]
+      retrievalGapsFlagged: string[]
+      stage2QuestionsSuppressed: string[]
+    }
   }
   findings?: import('@/contracts').Stage1Finding[]
   showTrace: boolean
+  requirementSources: RequirementDisplaySource[]
 }) {
   const companyContextFinding = showTrace ? findFindingByTopic(findings, 'company_context') : undefined
+  const riskGapItems = resolveRequirementDisplayItems(synthesis.riskGaps, requirementSources)
+  const trueCandidateGapItems = resolveRequirementDisplayItems(
+    synthesis.riskGapBreakdown?.trueCandidateGaps,
+    requirementSources
+  )
+  const weakButBridgeableItems = resolveRequirementDisplayItems(
+    synthesis.riskGapBreakdown?.weakButBridgeable,
+    requirementSources
+  )
+  const retrievalGapItems = resolveRequirementDisplayItems(
+    synthesis.riskGapBreakdown?.retrievalGaps,
+    requirementSources
+  )
+  const retrievalGapsFlaggedItems = resolveRequirementDisplayItems(
+    synthesis.qualityAudit?.retrievalGapsFlagged,
+    requirementSources
+  )
   return (
     <div className="space-y-5">
       <div>
@@ -1115,11 +1657,11 @@ function IntakeSynthesisView({
           <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Company Context</h3>
           {showTrace && <TraceChip finding={companyContextFinding} label="Why" />}
         </div>
-        <p className="text-sm text-gray-700">{synthesis.companySummary}</p>
+        <p className="text-sm leading-relaxed break-words text-gray-800">{synthesis.companySummary}</p>
       </div>
       <div>
         <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Fit Hypothesis</h3>
-        <p className="text-sm text-gray-700">{synthesis.fitHypothesis}</p>
+        <p className="text-sm leading-relaxed break-words text-gray-800">{synthesis.fitHypothesis}</p>
         {showTrace && (
           <p className="text-xs text-gray-400 italic mt-1">No formal trace yet</p>
         )}
@@ -1130,54 +1672,123 @@ function IntakeSynthesisView({
           {synthesis.emphasisRecommendation}
         </span>
       </div>
-      {synthesis.riskGaps.length > 0 && (
+      {riskGapItems.length > 0 && (
         <div>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-amber-600 mb-2">Risk / Gap Areas</h3>
           <ul className="space-y-1">
-            {synthesis.riskGaps.map((gap, i) => (
+            {riskGapItems.map((gap, i) => (
               <TraceableBullet
                 key={i}
-                text={gap}
-                finding={showTrace ? findFindingByTopic(findings, gap) : undefined}
+                text={gap.display}
+                finding={showTrace ? findFindingByTopic(findings, gap.original) ?? findFindingByTopic(findings, gap.display) : undefined}
                 className="text-sm text-amber-700"
               />
             ))}
           </ul>
         </div>
       )}
+
+      {synthesis.riskGapBreakdown && (
+        <div className="border border-amber-100 bg-amber-50/40 rounded-md px-3 py-3 space-y-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-amber-800">Risk / Gap Breakdown</h3>
+          {trueCandidateGapItems.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-red-600 mb-1">True Gaps</p>
+              <ul className="space-y-1">
+                {trueCandidateGapItems.map((g, i) => (
+                  <li key={i} className="text-sm leading-relaxed break-words text-gray-800">· {g.display}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {weakButBridgeableItems.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-amber-600 mb-1">Weak but Bridgeable</p>
+              <ul className="space-y-1">
+                {weakButBridgeableItems.map((g, i) => (
+                  <li key={i} className="text-sm leading-relaxed break-words text-gray-800">· {g.display}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {retrievalGapItems.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-violet-600 mb-1">Retrieval Gaps (likely in profile)</p>
+              <ul className="space-y-1">
+                {retrievalGapItems.map((g, i) => (
+                  <li key={i} className="text-sm leading-relaxed break-words text-gray-800">· {g.display}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {synthesis.resumeDirection && (
+        <div className="border border-indigo-100 bg-indigo-50/40 rounded-md px-3 py-3 space-y-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-indigo-700">Resume Direction</h3>
+          <p className="text-sm leading-relaxed break-words text-gray-800"><span className="font-semibold text-indigo-700">Summary:</span> {synthesis.resumeDirection.summaryGuidance}</p>
+          <p className="text-sm leading-relaxed break-words text-gray-800"><span className="font-semibold text-indigo-700">Skills:</span> {synthesis.resumeDirection.skillsGuidance}</p>
+          {synthesis.resumeDirection.experienceBulletGuidance.length > 0 && (
+            <ul className="space-y-1 mt-1">
+              {synthesis.resumeDirection.experienceBulletGuidance.map((g, i) => (
+                <li key={i} className="text-sm leading-relaxed break-words text-gray-800">· {g}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {synthesis.qualityAudit && (
+        <details className="border border-gray-200 rounded-md">
+          <summary className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 cursor-pointer select-none">
+            Quality Audit (I)
+          </summary>
+          <div className="px-3 pb-3 pt-1 space-y-2">
+            {synthesis.qualityAudit.compoundRequirementsSplit.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-gray-600 mb-0.5">Compound requirements split:</p>
+                <ul className="space-y-1">
+                  {synthesis.qualityAudit.compoundRequirementsSplit.map((s, i) => (
+                    <li key={i} className="text-xs text-gray-500">· {s}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {synthesis.qualityAudit.contradictionsResolved.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-gray-600 mb-0.5">Contradictions resolved:</p>
+                <ul className="space-y-1">
+                  {synthesis.qualityAudit.contradictionsResolved.map((s, i) => (
+                    <li key={i} className="text-xs text-gray-500">· {s}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {retrievalGapsFlaggedItems.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-violet-600 mb-0.5">Retrieval gaps flagged:</p>
+                <ul className="space-y-1">
+                  {retrievalGapsFlaggedItems.map((s, i) => (
+                    <li key={i} className="text-xs text-violet-600">· {s.display}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {synthesis.qualityAudit.stage2QuestionsSuppressed.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-green-700 mb-0.5">Stage 2 questions suppressed (already answered):</p>
+                <ul className="space-y-1">
+                  {synthesis.qualityAudit.stage2QuestionsSuppressed.map((s, i) => (
+                    <li key={i} className="text-xs text-green-600">· {s}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </details>
+      )}
     </div>
   )
 }
 
-async function runIntake(
-  jdText: string,
-  domainIQText: string,
-  profile: unknown,
-  jdSourceType: JDSourceType = 'pasted_jd',
-  roleTitle?: string,
-  company?: string,
-  profileEvidenceIndex?: ProfileEvidenceIndexItem[]
-) {
-  const res = await fetch('/api/intake', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jdText, domainIQText, profile, jdSourceType, roleTitle, company, profileEvidenceIndex }),
-  })
-  if (!res.ok) {
-    const err = await res.json()
-    throw new Error(err.message ?? err.error ?? 'Intake API failed')
-  }
-  return res.json() as Promise<{
-    rawJD: import('@/contracts').RawJD
-    requirementMap: import('@/contracts').JDRequirementMap
-    domainIQ: import('@/contracts').DomainIQImport
-    synthesis: {
-      companySummary: string
-      fitHypothesis: string
-      evaluatorLens: string
-      riskGaps: string[]
-      emphasisRecommendation: import('@/contracts').EmphasisCategory
-    }
-    fitAnalysis: FitAnalysis
-  }>
-}

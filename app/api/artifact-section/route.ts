@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { generateArtifactSection, type GenerateOptions } from '@/lib/llm/generate-artifact-section'
 import type { SectionType, JDRequirementMap, UserProfile, BridgeQuestion, LearningSignal, EmphasisCategory, CalibrationSummary, ProfileProjection } from '@/contracts'
+import type { FitAnalysisContext, CalibrationRefSlim } from '@/lib/artifacts/buildArtifactRefinementContext'
 
 export async function POST(req: NextRequest) {
   try {
@@ -24,6 +25,8 @@ export async function POST(req: NextRequest) {
       profileProjection?: ProfileProjection
       roleTitle?: string
       company?: string
+      fitAnalysisContext?: FitAnalysisContext
+      calibrationRefs?: CalibrationRefSlim[]
     }
 
     // ── Stage 1 prerequisite guard ───────────────────────────────────────────
@@ -59,6 +62,8 @@ export async function POST(req: NextRequest) {
       profileProjection: body.profileProjection,
       roleTitle: body.roleTitle,
       company: body.company,
+      fitAnalysisContext: body.fitAnalysisContext,
+      calibrationRefs: body.calibrationRefs,
     })
 
     return NextResponse.json(result)

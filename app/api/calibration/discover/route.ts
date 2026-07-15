@@ -9,6 +9,7 @@ export async function POST(req: NextRequest) {
       roleTitle: string
       type: 'target' | 'comparable'
       jdSummary?: string
+      jdText?: string
     }
 
     if (!body.sessionId || !body.targetCompany || !body.roleTitle || !body.type) {
@@ -23,7 +24,8 @@ export async function POST(req: NextRequest) {
       targetCompany: body.targetCompany,
       roleTitle: body.roleTitle,
       type: body.type,
-      jdSummary: body.jdSummary
+      jdSummary: body.jdSummary,
+      jdText: body.jdText,
     })
 
     return NextResponse.json(result)

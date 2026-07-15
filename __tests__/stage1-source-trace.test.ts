@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest'
+﻿import { describe, expect, it } from 'vitest'
 import { buildCompanyContextFinding, buildJDRequirementFinding } from '@/lib/stage1/source-trace'
 import type { JDRequirement } from '@/contracts'
 
-describe('Stage 1 source trace — claim-level provenance', () => {
+describe('Stage 1 source trace â€” claim-level provenance', () => {
   it('cites the JD as primary even when QuickStart repeats the same claim', () => {
     const finding = buildCompanyContextFinding({
       id: 'company-context-supply-chain',
@@ -41,7 +41,7 @@ describe('Stage 1 source trace — claim-level provenance', () => {
       text: 'Writing epics, user stories, and acceptance criteria',
       category: 'process',
       userCoverageStatus: 'covered',
-      profileEvidence: 'Authored epics, user stories, and acceptance criteria for 6 quarterly releases at Paylocity.',
+      profileEvidence: 'Authored epics, user stories, and acceptance criteria for 6 quarterly releases at SaaS Co.',
     }
 
     const finding = buildJDRequirementFinding(requirement, 0)
@@ -52,3 +52,4 @@ describe('Stage 1 source trace — claim-level provenance', () => {
     expect(finding.downstreamPermission).toBe('can_support_resume_claim')
   })
 })
+

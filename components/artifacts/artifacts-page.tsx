@@ -17,6 +17,7 @@ import { addLearningSignal, getGenerationContext } from '@/lib/storage/learning-
 import { addArtifactHistory } from '@/lib/storage/artifact-history'
 import { containsRejectedPhrase } from '@/lib/validators/claim-classifier'
 import { isGlobalEvidenceWarning } from '@/lib/evidence-scope'
+import { buildArtifactRefinementContext } from '@/lib/artifacts/buildArtifactRefinementContext'
 import type {
   TargetIntake, ArtifactSection, SectionType,
   CalibrationSummary, AppliedCalibrationState,
@@ -28,16 +29,16 @@ import { ArtifactSectionCard } from './artifact-section-card'
 import { CalibrationPanel } from './calibration-panel'
 
 const SECTION_ORDER: SectionType[] = [
-  'summary', 'skills', 'experience-po', 'experience-ba', 'experience-qa',
+  'summary', 'skills', 'experience-primary', 'experience-secondary', 'experience-supporting',
   'cover-letter', 'referral-message', 'recruiter-message', 'linkedin-dm', 'talking-points'
 ]
 
 const SECTION_LABELS: Record<SectionType, string> = {
   summary: 'Professional Summary',
   skills: 'Skills',
-  'experience-po': 'Experience (Product Owner)',
-  'experience-ba': 'Experience (Business Analyst)',
-  'experience-qa': 'Experience (QA / Quality)',
+  'experience-primary': 'Experience (Product Owner)',
+  'experience-secondary': 'Experience (Business Analyst)',
+  'experience-supporting': 'Experience (QA / Quality)',
   'cover-letter': 'Cover Letter',
   'referral-message': 'Referral Message',
   'recruiter-message': 'Recruiter Message',
@@ -166,13 +167,14 @@ export function ArtifactsPage({ sessionId }: { sessionId: string }) {
     if (existing?.status === 'accepted' && !refinementInstruction) return
     if (!session) return
 
-    const [profile, signalCtx, activeSnapshot] = await Promise.all([
+    const [profile, signalCtx, activeSnapshot, artifactContext] = await Promise.all([
       getUserProfile(),
       getGenerationContext({
         roleCategory: session.emphasisRecommendation,
         sectionType: type
       }),
-      getActiveSnapshot()
+      getActiveSnapshot(),
+      buildArtifactRefinementContext(session, appliedCalibrationState),
     ])
     if (!profile) { setError('Profile required.'); return }
 
@@ -231,6 +233,8 @@ export function ArtifactsPage({ sessionId }: { sessionId: string }) {
           profileProjection,
           roleTitle: session.roleTitle,
           company: session.company,
+          fitAnalysisContext: artifactContext.fitAnalysisContext,
+          calibrationRefs: artifactContext.calibrationRefs,
         })
       })
 
@@ -282,9 +286,10 @@ export function ArtifactsPage({ sessionId }: { sessionId: string }) {
     if (!session) return
     if (!instruction.trim()) return
 
-    const [profile, signalCtx] = await Promise.all([
+    const [profile, signalCtx, artifactContext] = await Promise.all([
       getUserProfile(),
-      getGenerationContext({ roleCategory: session.emphasisRecommendation, sectionType: type })
+      getGenerationContext({ roleCategory: session.emphasisRecommendation, sectionType: type }),
+      buildArtifactRefinementContext(session, appliedCalibrationState),
     ])
     if (!profile) { setError('Profile required.'); return }
 
@@ -323,6 +328,8 @@ export function ArtifactsPage({ sessionId }: { sessionId: string }) {
           overallRefinementPrompt: overallPrompt || undefined,
           roleTitle: session.roleTitle,
           company: session.company,
+          fitAnalysisContext: artifactContext.fitAnalysisContext,
+          calibrationRefs: artifactContext.calibrationRefs,
         })
       })
 
@@ -560,6 +567,7 @@ export function ArtifactsPage({ sessionId }: { sessionId: string }) {
           targetCompany={session.company}
           roleTitle={session.roleTitle}
           jdSummary={session.jobDescription?.summary}
+          jdText={session.jobDescription?.fullText}
           onCalibrationApplied={(summary, applied) => handleCalibrationApplied(summary, applied)}
           onSkip={handleCalibrationSkip}
         />

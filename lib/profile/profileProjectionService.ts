@@ -20,13 +20,13 @@ import { tokenOverlap } from './profileNormalizer'
 // ─── Category→SectionType relevance table ─────────────────────────────────────
 
 const CLAIM_CATEGORY_RELEVANCE: Record<string, SectionType[]> = {
-  role: ['experience-po', 'experience-ba', 'experience-qa', 'summary'],
-  responsibility: ['experience-po', 'experience-ba', 'experience-qa', 'summary'],
-  achievement: ['experience-po', 'experience-ba', 'experience-qa', 'summary', 'skills'],
-  metric: ['experience-po', 'experience-ba', 'experience-qa', 'summary'],
-  domain: ['summary', 'experience-po', 'experience-ba', 'experience-qa'],
-  tool: ['skills', 'experience-po', 'experience-ba', 'experience-qa'],
-  method: ['skills', 'experience-po', 'experience-ba', 'experience-qa'],
+  role: ['experience-primary', 'experience-secondary', 'experience-supporting', 'summary'],
+  responsibility: ['experience-primary', 'experience-secondary', 'experience-supporting', 'summary'],
+  achievement: ['experience-primary', 'experience-secondary', 'experience-supporting', 'summary', 'skills'],
+  metric: ['experience-primary', 'experience-secondary', 'experience-supporting', 'summary'],
+  domain: ['summary', 'experience-primary', 'experience-secondary', 'experience-supporting'],
+  tool: ['skills', 'experience-primary', 'experience-secondary', 'experience-supporting'],
+  method: ['skills', 'experience-primary', 'experience-secondary', 'experience-supporting'],
   constraint: ['summary'],
   preference: ['summary'],
 }
@@ -153,6 +153,7 @@ export function buildEvidenceIndex(
       text: c.text,
       category: c.category,
       evidenceStrength: c.evidenceStrength,
+      sourceType: 'manual_profile' as const,
     }))
 
   const skillItems: ProfileEvidenceIndexItem[] = dimensions.skills.map(s => ({
@@ -161,6 +162,7 @@ export function buildEvidenceIndex(
     text: s.name,
     category: 'skill' as const,
     evidenceStrength: s.evidenceStrength,
+    sourceType: 'manual_profile' as const,
   }))
 
   const toolItems: ProfileEvidenceIndexItem[] = dimensions.tools.map(t => ({
@@ -169,6 +171,7 @@ export function buildEvidenceIndex(
     text: t.name,
     category: 'tool' as const,
     evidenceStrength: 'medium' as const,
+    sourceType: 'manual_profile' as const,
   }))
 
   const all = [...claimItems, ...skillItems, ...toolItems].sort(
