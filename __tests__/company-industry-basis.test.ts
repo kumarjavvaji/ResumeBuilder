@@ -292,6 +292,26 @@ describe('Company / Industry Basis quick start', () => {
     expect(result.warnings.length).toBe(2)
   })
 
+  it('treats max_tokens stop_reason as incomplete even when tool input looks valid', async () => {
+    const createMessage = vi.fn()
+      .mockResolvedValueOnce({ ...toolResponse(makeValidLlmBasis()), stop_reason: 'max_tokens' })
+      .mockResolvedValueOnce({ ...toolResponse(makeValidLlmBasis()), stop_reason: 'max_tokens' })
+
+    const result = await generateCompanyIndustryBasis({
+      targetCompany: 'ExampleCo',
+      targetRoleTitle: 'Product Analyst',
+      jobDescription: ROLLOUT_JD,
+    }, { createMessage })
+
+    expect(createMessage).toHaveBeenCalledTimes(2)
+    expect(result.mode).toBe('fallback')
+    expect(result.diagnostic.mode).toBe('deterministic_fallback')
+    expect(result.diagnostic.parseSucceeded).toBe(false)
+    expect(result.diagnostic.validationSucceeded).toBe(false)
+    expect(result.warnings.join(' ')).toMatch(/max_tokens/i)
+    expect(result.domainIQJson).toContain('Deterministic fallback basis')
+  })
+
   it('provider failure returns fallbackReason and provider details', async () => {
     const providerError = new Error('Anthropic authentication failed for api_key=secret-value')
     providerError.name = 'AuthenticationError'
